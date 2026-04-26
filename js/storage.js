@@ -1042,5 +1042,28 @@ const TaskSystem = {
             return task;
         }
         return null;
+    },
+    
+    // ============ 题目生成队列 ============
+    
+    /**
+     * 获取待生成题目的队列
+     */
+    getPendingQueue() {
+        const queue = localStorage.getItem('pending_questions_queue');
+        return queue ? JSON.parse(queue) : [];
+    },
+    
+    /**
+     * 添加到待生成队列（第二天上午生成）
+     */
+    addToPendingQueue(record) {
+        const queue = this.getPendingQueue();
+        queue.push({
+            ...record,
+            addedAt: new Date().toISOString(),
+            date: Utils.getToday()
+        });
+        localStorage.setItem('pending_questions_queue', JSON.stringify(queue));
     }
 };
