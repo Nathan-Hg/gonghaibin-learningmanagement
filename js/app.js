@@ -560,6 +560,9 @@ const App = {
     
     // ============ 答题相关 ============
     
+    // 答题状态
+    examAnswers: {},
+    
     /**
      * 加载答题内容
      */
@@ -582,7 +585,7 @@ const App = {
             </div>
             
             ${exam.questions.map((q, index) => `
-                <div class="question-card">
+                <div class="question-card" id="question-${q.id}">
                     <div class="question-header">
                         <span class="question-type ${q.type === '记忆' ? 'memory' : 'understanding'}">
                             ${q.type === '记忆' ? '💭 记忆题' : '💡 理解题'}
@@ -593,24 +596,33 @@ const App = {
                     
                     <div class="question-answer">
                         <label>你的回答：</label>
-                        <div class="mt-2">
-                            <button class="record-btn" style="width: 48px; height: 48px;" 
-                                    onclick="App.recordAnswer('${q.id}')">
+                        <div class="mt-2 flex items-center gap-3">
+                            <button class="record-btn ${this.examAnswers[q.id] ? 'recording' : ''}" 
+                                    style="width: 48px; height: 48px;" 
+                                    id="record-btn-${q.id}"
+                                    onclick="App.toggleRecordAnswer('${q.id}')">
                                 <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
                                     <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"></path>
+                                    <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/>
                                 </svg>
                             </button>
+                            <div class="text-muted" style="font-size: 12px;">
+                                点击麦克风录音作答
+                            </div>
                         </div>
-                        <div class="mt-2 text-muted" style="font-size: 12px;">
-                            点击录音作答，录音将转文字存储
+                        <div class="answer-text mt-3" id="answer-text-${q.id}" style="display: none;">
+                            <div class="card" style="background: var(--bg-secondary); padding: 12px; border-radius: 8px;">
+                                <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 4px;">作答内容：</div>
+                                <div id="answer-content-${q.id}" style="font-size: 14px;"></div>
+                            </div>
                         </div>
                     </div>
                     
                     <div class="mt-4">
-                        <label>自我评分：</label>
-                        <div class="star-rating mt-2" data-question="${q.id}">
-                            ${[1,2,3,4,5].map(n => `
-                                <svg class="star" data-score="${n}" onclick="App.setScore(this, ${n})" 
+                        <label>自我评分（1-10星）：</label>
+                        <div class="star-rating mt-2" id="star-rating-${q.id}" data-question="${q.id}">
+                            ${[1,2,3,4,5,6,7,8,9,10].map(n => `
+                                <svg class="star" data-score="${n}" onclick="App.setScore('${q.id}', ${n})" 
                                      viewBox="0 0 24 24" fill="currentColor">
                                     <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
                                 </svg>
@@ -626,25 +638,146 @@ const App = {
         `;
     },
     
+    // 当前录音状态
+    currentRecording: null,
+    recognition: null,
+    
     /**
-     * 录音作答
+     * 切换录音状态
      */
-    async recordAnswer(questionId) {
-        Utils.showToast('开始录音...', 'default');
-        // 模拟录音
-        setTimeout(() => {
-            Utils.showToast('回答已录制', 'success');
-        }, 2000);
+    toggleRecordAnswer(questionId) {
+        if (this.currentRecording === questionId) {
+            // 停止录音
+            this.stopRecording();
+        } else {
+            // 开始录音
+            this.startRecording(questionId);
+        }
+    },
+    
+    /**
+     * 开始录音
+     */
+    startRecording(questionId) {
+        // 检查浏览器支持
+        if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+            Utils.showToast('您的浏览器不支持语音识别，请使用Chrome浏览器', 'error');
+            return;
+        }
+        
+        // 停止之前的录音
+        if (this.currentRecording) {
+            this.stopRecording();
+        }
+        
+        // 创建语音识别对象
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        this.recognition = new SpeechRecognition();
+        this.recognition.lang = 'zh-CN';
+        this.recognition.continuous = true;
+        this.recognition.interimResults = true;
+        
+        this.currentRecording = questionId;
+        
+        // 更新按钮状态
+        const btn = document.getElementById(`record-btn-${questionId}`);
+        if (btn) {
+            btn.classList.add('recording');
+            btn.style.background = '#EF4444';
+        }
+        
+        Utils.showToast('🎤 开始录音，请说话...', 'default');
+        
+        // 识别结果
+        let finalTranscript = '';
+        let interimTranscript = '';
+        
+        this.recognition.onresult = (event) => {
+            for (let i = event.resultIndex; i < event.results.length; i++) {
+                const transcript = event.results[i][0].transcript;
+                if (event.results[i].isFinal) {
+                    finalTranscript += transcript;
+                } else {
+                    interimTranscript = transcript;
+                }
+            }
+            
+            // 显示识别结果
+            const answerText = document.getElementById(`answer-text-${questionId}`);
+            const answerContent = document.getElementById(`answer-content-${questionId}`);
+            if (answerText && answerContent) {
+                answerText.style.display = 'block';
+                answerContent.textContent = finalTranscript || interimTranscript || '正在识别...';
+            }
+            
+            // 保存答案
+            if (finalTranscript) {
+                this.examAnswers[questionId] = {
+                    text: finalTranscript,
+                    timestamp: Date.now()
+                };
+            }
+        };
+        
+        this.recognition.onerror = (event) => {
+            console.error('语音识别错误:', event.error);
+            Utils.showToast('语音识别出错：' + event.error, 'error');
+            this.stopRecording();
+        };
+        
+        this.recognition.onend = () => {
+            // 自动停止录音后更新状态
+            if (this.currentRecording === questionId) {
+                this.stopRecording();
+            }
+        };
+        
+        // 开始识别
+        this.recognition.start();
+    },
+    
+    /**
+     * 停止录音
+     */
+    stopRecording() {
+        if (this.recognition) {
+            this.recognition.stop();
+            this.recognition = null;
+        }
+        
+        const questionId = this.currentRecording;
+        this.currentRecording = null;
+        
+        // 更新按钮状态
+        if (questionId) {
+            const btn = document.getElementById(`record-btn-${questionId}`);
+            if (btn) {
+                btn.classList.remove('recording');
+                btn.style.background = '';
+            }
+            
+            if (this.examAnswers[questionId]) {
+                Utils.showToast('✅ 录音完成，已保存答案', 'success');
+            }
+        }
     },
     
     /**
      * 设置评分
      */
-    setScore(star, score) {
-        const container = star.closest('.star-rating');
+    setScore(questionId, score) {
+        const container = document.getElementById(`star-rating-${questionId}`);
+        if (!container) return;
+        
         container.querySelectorAll('.star').forEach((s, i) => {
             s.classList.toggle('active', i < score);
         });
+        
+        // 保存评分
+        if (!this.examAnswers[questionId]) {
+            this.examAnswers[questionId] = {};
+        }
+        this.examAnswers[questionId].score = score;
     },
     
     /**
