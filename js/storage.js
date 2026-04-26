@@ -725,6 +725,68 @@ const Storage = {
      */
     getExamResults() {
         return Utils.storage.get('exam_results', []);
+    },
+
+    // ============ 知识库相关 ============
+
+    /**
+     * 获取已完成的学习内容
+     */
+    async getCompletedLearnings(type) {
+        const learnings = await this.getLearningsByType(type);
+        return learnings.filter(l => l.status === 'completed');
+    },
+
+    /**
+     * 获取所有学习内容
+     */
+    async getLearnings() {
+        const index = await this.getBookIndex();
+        return index.items || [];
+    },
+
+    /**
+     * 获取某类型所有学习内容
+     */
+    async getLearningsByType(type) {
+        const index = await this.getBookIndex();
+        const typeMap = {
+            'book': '图书',
+            'video': '视频',
+            'audio': '音频文稿'
+        };
+        const chineseType = typeMap[type] || type;
+        return (index.items || []).filter(l => l.type === chineseType);
+    },
+
+    /**
+     * 获取某个学习内容（通过ID）
+     */
+    async getLearningById(id) {
+        const index = await this.getBookIndex();
+        return (index.items || []).find(l => l.id === id);
+    },
+
+    /**
+     * 更新学习内容状态
+     */
+    async updateLearningStatus(learningId, status) {
+        const index = await this.getBookIndex();
+        const learning = (index.items || []).find(l => l.id === learningId);
+        if (learning) {
+            learning.status = status;
+            if (status === 'completed') {
+                learning.completed_at = new Date().toISOString();
+            }
+            await this.write('books_courses.json', index);
+        }
+    },
+
+    /**
+     * 自动标记完成
+     */
+    async markLearningCompleted(learningId) {
+        await this.updateLearningStatus(learningId, 'completed');
     }
 };
 // ============ 任务系统核心逻辑 ============

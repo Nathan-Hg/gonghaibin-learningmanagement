@@ -561,6 +561,14 @@ const App = {
      * 处理语音转写结果
      */
     async processVoiceTranscript(transcript) {
+        // 显示识别结果
+        const voiceResult = document.getElementById('voice-result');
+        const voiceResultText = document.getElementById('voice-result-text');
+        if (voiceResult && voiceResultText) {
+            voiceResultText.textContent = transcript;
+            voiceResult.style.display = 'block';
+        }
+        
         Utils.showToast('正在AI解析...', 'default');
         
         // 调用AI提取结构化信息
@@ -813,6 +821,125 @@ const App = {
             Utils.showToast('任务已延期', 'success');
             this.loadTasks();
         }
+    },
+    
+    // 当前选中的任务类型
+    currentTaskType: 'daily',
+    
+    /**
+     * 切换任务类型（日任务/周任务）
+     */
+    async switchTaskType(type) {
+        this.currentTaskType = type;
+        
+        // 更新Tab状态
+        document.querySelectorAll('.tabs .tab').forEach(tab => {
+            tab.classList.remove('active');
+            if (tab.textContent.includes(type === 'daily' ? '日任务' : '周任务')) {
+                tab.classList.add('active');
+            }
+        });
+        
+        // 加载对应类型的任务
+        await this.loadTasks();
+    },
+    
+    /**
+     * 获取过期任务统计
+     */
+    async getExpiredTasksStats() {
+        const tasks = await Storage.getTasks();
+        const thirtyDaysAgo = new Date();
+        thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+        
+        const expiredDaily = tasks.filter(t => 
+            t.type === 'daily' && 
+            new Date(t.due_date) < thirtyDaysAgo && 
+            t.status !== 'completed'
+        );
+        
+        const expiredWeekly = tasks.filter(t => 
+            t.type === 'weekly' && 
+            new Date(t.due_date) < thirtyDaysAgo && 
+            t.status !== 'completed'
+        );
+        
+        const totalDaily = tasks.filter(t => t.type === 'daily').length;
+        const totalWeekly = tasks.filter(t => t.type === 'weekly').length;
+        
+        return {
+            daily: { expired: expiredDaily.length, total: totalDaily },
+            weekly: { expired: expiredWeekly.length, total: totalWeekly }
+        };
+    },
+    
+    /**
+     * 加载任务列表（支持按类型筛选）
+     */
+    async loadTasks() {
+        const container = document.getElementById('task-list');
+        if (!container) return;
+        
+        // 显示加载状态
+        container.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+        
+        // 从存储获取任务数据
+        const storedTasks = await Storage.getTasks();
+        const allTasks = storedTasks && storedTasks.length > 0 ? storedTasks : [
+            { id: 'task_1', title: '复习《认知觉醒》第一章', source: '图书', type: 'daily', dueDate: Utils.getToday(), status: 'pending' },
+            { id: 'task_2', title: '复习《Python编程》基础语法', source: '视频', type: 'daily', dueDate: Utils.getRelativeDate(-1), status: 'pending' },
+            { id: 'task_3', title: '完成本周学习总结', source: '综合', type: 'weekly', dueDate: Utils.getRelativeDate(-3), status: 'completed' }
+        ];
+        
+        // 按类型筛选任务
+        const filteredTasks = allTasks.filter(task => task.type === this.currentTaskType);
+        
+        // 更新过期任务统计
+        const expiredSection = document.getElementById('expired-tasks-section');
+        if (expiredSection) {
+            const stats = await this.getExpiredTasksStats();
+            document.getElementById('expired-daily-count').textContent = `${stats.daily.expired}/${stats.daily.total}`;
+            document.getElementById('expired-weekly-count').textContent = `${stats.weekly.expired}/${stats.weekly.total}`;
+            expiredSection.style.display = 'block';
+        }
+        
+        // 只有当真正没有数据时才显示空状态
+        if (!filteredTasks || filteredTasks.length === 0) {
+            container.innerHTML = `
+                <div class="empty-state">
+                    <div class="empty-icon">
+                        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+                            <polyline points="22 4 12 14.01 9 11.01"></polyline>
+                        </svg>
+                    </div>
+                    <div class="empty-title">暂无${this.currentTaskType === 'daily' ? '日' : '周'}任务</div>
+                    <div class="empty-desc">完成学习录入后会自动生成复习任务</div>
+                </div>
+            `;
+            return;
+        }
+        
+        container.innerHTML = filteredTasks.map(task => `
+            <div class="task-item">
+                <div class="task-checkbox ${task.status === 'completed' ? 'checked' : ''}" 
+                     onclick="App.toggleTask('${task.id}')"></div>
+                <div class="task-content">
+                    <div class="task-title ${task.status === 'completed' ? 'text-muted' : ''}" 
+                         style="${task.status === 'completed' ? 'text-decoration: line-through;' : ''}">
+                        ${task.title}
+                    </div>
+                    <div class="task-meta">
+                        ${task.source || ''} · ${task.status === 'completed' ? '已完成' : '待完成'}
+                    </div>
+                </div>
+                ${task.status !== 'completed' ? `
+                    <div class="task-actions">
+                        <button class="btn btn-sm btn-outline" onclick="App.postponeTask('${task.id}')">延期</button>
+                    </div>
+                ` : ''}
+            </div>
+        `).join('');
     },
     
     // ============ 答题相关 ============
@@ -1539,6 +1666,163 @@ const App = {
      */
     async loadArchiveByDate() {
         const container = document.getElementById('archive-content');
+        const dateSelector = document.getElementById('date-selector');
+        
+        if (container) container.style.display = 'none';
+        if (dateSelector) {
+            dateSelector.style.display = 'block';
+            await this.initDateSelector();
+            await this.updateArchiveCalendar();
+        }
+    },
+    
+    /**
+     * 初始化日期选择器
+     */
+    async initDateSelector() {
+        const daySelect = document.getElementById('day-select');
+        if (!daySelect) return;
+        
+        const year = parseInt(document.getElementById('year-select')?.value || new Date().getFullYear());
+        const month = parseInt(document.getElementById('month-select')?.value || (new Date().getMonth() + 1));
+        const daysInMonth = new Date(year, month, 0).getDate();
+        
+        let options = '';
+        for (let d = 1; d <= daysInMonth; d++) {
+            const isToday = d === new Date().getDate() && 
+                           year === new Date().getFullYear() && 
+                           month === new Date().getMonth() + 1;
+            options += `<option value="${d}" ${isToday ? 'selected' : ''}>${d}日</option>`;
+        }
+        daySelect.innerHTML = options;
+    },
+    
+    /**
+     * 更新档案日历
+     */
+    async updateArchiveCalendar() {
+        const year = parseInt(document.getElementById('year-select')?.value || new Date().getFullYear());
+        const month = parseInt(document.getElementById('month-select')?.value || (new Date().getMonth() + 1));
+        const day = parseInt(document.getElementById('day-select')?.value || new Date().getDate());
+        
+        // 重新初始化日期选项
+        await this.initDateSelector();
+        
+        // 渲染日历
+        await this.renderArchiveCalendarWithYearMonth(year, month);
+    },
+    
+    /**
+     * 渲染档案日历（带年月参数）
+     */
+    async renderArchiveCalendarWithYearMonth(year, month) {
+        const container = document.getElementById('archive-calendar');
+        if (!container) return;
+        
+        // 获取该月有记录的日期
+        const recordDates = await this.getMonthRecordDates(year, month);
+        
+        // 计算日历数据
+        const firstDay = new Date(year, month - 1, 1).getDay();
+        const daysInMonth = new Date(year, month, 0).getDate();
+        
+        let html = '';
+        
+        // 上月空白
+        const prevMonthDays = new Date(year, month - 1, 0).getDate();
+        for (let i = firstDay - 1; i >= 0; i--) {
+            html += `<div class="calendar-day other-month">${prevMonthDays - i}</div>`;
+        }
+        
+        // 当月日期
+        const today = Utils.getToday();
+        for (let day = 1; day <= daysInMonth; day++) {
+            const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+            const hasRecord = recordDates.includes(dateStr);
+            const isToday = dateStr === today;
+            
+            let classes = 'calendar-day';
+            if (isToday) classes += ' today';
+            if (hasRecord) classes += ' has-record';
+            
+            html += `
+                <div class="${classes}" data-date="${dateStr}" onclick="App.showArchiveDateRecords('${dateStr}')">
+                    ${day}
+                </div>
+            `;
+        }
+        
+        // 下月空白
+        const totalCells = firstDay + daysInMonth;
+        const remaining = totalCells % 7 === 0 ? 0 : 7 - (totalCells % 7);
+        for (let i = 1; i <= remaining; i++) {
+            html += `<div class="calendar-day other-month">${i}</div>`;
+        }
+        
+        container.innerHTML = `
+            <div class="calendar-header">
+                <div class="calendar-title">${year}年${month}月</div>
+            </div>
+            <div class="calendar-weekdays">
+                <div class="calendar-weekday">日</div>
+                <div class="calendar-weekday">一</div>
+                <div class="calendar-weekday">二</div>
+                <div class="calendar-weekday">三</div>
+                <div class="calendar-weekday">四</div>
+                <div class="calendar-weekday">五</div>
+                <div class="calendar-weekday">六</div>
+            </div>
+            <div class="calendar-days">${html}</div>
+        `;
+    },
+    
+    /**
+     * 显示档案日期记录
+     */
+    async showArchiveDateRecords(dateStr) {
+        const container = document.getElementById('archive-date-records');
+        if (!container) return;
+        
+        // 更新选中状态
+        document.querySelectorAll('.calendar-day').forEach(el => el.classList.remove('selected'));
+        const selected = document.querySelector(`.calendar-day[data-date="${dateStr}"]`);
+        if (selected) selected.classList.add('selected');
+        
+        // 获取当日记录
+        const records = await Storage.getRecordsByDate(dateStr);
+        
+        if (records.length === 0) {
+            container.innerHTML = `
+                <div class="empty-state">
+                    <div class="empty-title">${dateStr}</div>
+                    <div class="empty-desc">暂无学习记录</div>
+                </div>
+            `;
+        } else {
+            container.innerHTML = `
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-title">${dateStr} 学习记录</div>
+                    </div>
+                    ${records.map(r => `
+                        <div class="list-item">
+                            <div class="list-item-icon">
+                                ${r.type === '图书' ? '📚' : r.type === '视频' ? '🎬' : '🎧'}
+                            </div>
+                            <div class="list-item-content">
+                                <div class="list-item-title">${r.content_name}</div>
+                                <div class="list-item-desc">${r.content_desc || ''} · ${r.duration}分钟</div>
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            `;
+        }
+    },
+    
+    // 保留原有的按日期查看函数（兼容）
+    async loadArchiveByDateOriginal() {
+        const container = document.getElementById('archive-content');
         if (!container) return;
         
         container.innerHTML = `
@@ -1766,6 +2050,9 @@ const App = {
     // 知识库原始数据
     _knowledgeData: [],
     
+    // 当前知识库类型
+    currentKnowledgeType: 'book',
+    
     /**
      * 加载知识库
      */
@@ -1773,33 +2060,38 @@ const App = {
         const container = document.getElementById('knowledge-list');
         if (!container) return;
         
-        // 模拟知识库数据
-        const mockKnowledge = [
-            { name: '认知觉醒', content: '## 第一章：大脑的原理\n- 本能脑：约3.6亿年前演化\n- 情绪脑：约2亿年前演化\n- 理智脑：约250万年前演化\n\n## 第二章：潜意识\n- 模糊的类型：认知模糊、情绪模糊、行动模糊\n- 消除模糊：学习知识、保持清醒、详细审视' },
-            { name: 'Python基础', content: '## 数据类型\n- 整数、浮点数、字符串\n- 列表、元组、字典\n\n## 控制流\n- if条件判断\n- for/while循环' }
+        container.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+        
+        // 从存储获取已完成的学习内容
+        const completedLearnings = await Storage.getCompletedLearnings(this.currentKnowledgeType);
+        
+        // 模拟数据（如果没有真实数据）
+        const mockKnowledge = completedLearnings.length > 0 ? completedLearnings : [
+            { id: 'kb_1', name: '认知觉醒', type: '图书', record_count: 5, duration: 180, status: 'completed' },
+            { id: 'kb_2', name: 'Python编程入门', type: '视频', record_count: 8, duration: 240, status: 'completed' }
         ];
         
         // 保存原始数据用于搜索
         this._knowledgeData = mockKnowledge;
         
-        // 只有当真正没有数据时才显示空状态
-        if (!mockKnowledge || mockKnowledge.length === 0) {
-            container.innerHTML = `
-                <div class="empty-state">
-                    <div class="empty-icon">
-                        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
-                            <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path>
-                        </svg>
-                    </div>
-                    <div class="empty-title">知识库为空</div>
-                    <div class="empty-desc">点击"新建"开始构建你的知识体系</div>
-                </div>
-            `;
-            return;
-        }
-        
         this.renderKnowledgeList(mockKnowledge);
+    },
+    
+    /**
+     * 切换知识库类型
+     */
+    async switchKnowledgeType(type) {
+        this.currentKnowledgeType = type;
+        
+        // 更新Tab状态
+        document.querySelectorAll('.tabs .tab').forEach(tab => {
+            tab.classList.remove('active');
+            if (tab.textContent.includes(type === 'book' ? '图书' : type === 'video' ? '视频' : '音频')) {
+                tab.classList.add('active');
+            }
+        });
+        
+        await this.loadKnowledge();
     },
     
     /**
@@ -1818,23 +2110,24 @@ const App = {
                             <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path>
                         </svg>
                     </div>
-                    <div class="empty-title">未找到匹配结果</div>
-                    <div class="empty-desc">尝试其他关键词搜索</div>
+                    <div class="empty-title">暂无已完成的${this.currentKnowledgeType === 'book' ? '图书' : this.currentKnowledgeType === 'video' ? '视频' : '音频'}学习</div>
+                    <div class="empty-desc">完成学习后会自动加入知识库</div>
                 </div>
             `;
             return;
         }
         
         container.innerHTML = items.map(item => `
-            <div class="card mb-4">
-                <div class="knowledge-item-title font-semibold" onclick="App.toggleKnowledge(this)">
-                    📖 ${item.name}
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <polyline points="6 9 12 15 18 9"></polyline>
-                    </svg>
-                </div>
-                <div class="knowledge-item-content" style="display: none;">
-                    <pre style="white-space: pre-wrap; font-family: inherit; font-size: 13px;">${item.content}</pre>
+            <div class="card mb-3">
+                <div class="learning-item" onclick="App.toggleKnowledge(this)">
+                    <div class="learning-icon">${item.type === '图书' ? '📚' : item.type === '视频' ? '🎬' : '🎧'}</div>
+                    <div class="learning-info">
+                        <div class="learning-title">${item.name}</div>
+                        <div class="learning-stats">
+                            打卡${item.record_count || 0}天 · ${(item.duration || 0) / 60 | 0}h
+                        </div>
+                    </div>
+                    <div class="learning-arrow">›</div>
                 </div>
             </div>
         `).join('');
@@ -1855,7 +2148,7 @@ const App = {
         // 过滤匹配项
         const filtered = this._knowledgeData.filter(item => 
             item.name.toLowerCase().includes(trimmed) || 
-            item.content.toLowerCase().includes(trimmed)
+            (item.content && item.content.toLowerCase().includes(trimmed))
         );
         
         this.renderKnowledgeList(filtered);
@@ -1882,27 +2175,280 @@ const App = {
     
     // ============ 统计相关 ============
     
+    // 当前统计模式
+    currentStatsMode: 'content',
+    
+    // 当前统计类型
+    currentStatsType: 'book',
+    
+    // 统计当前月份
+    statsCurrentMonth: new Date(),
+    
     /**
      * 加载统计数据
      */
     async loadStats() {
-        // 模拟统计数据
-        const stats = {
-            totalHours: 128,
-            totalContents: 35,
-            completedRate: 78,
-            avgMastery: 7.5
-        };
+        // 默认显示按内容统计
+        await this.switchStatsMode('content');
+    },
+    
+    /**
+     * 切换统计模式
+     */
+    async switchStatsMode(mode) {
+        this.currentStatsMode = mode;
         
-        const hoursEl = document.getElementById('stat-hours');
-        const contentsEl = document.getElementById('stat-contents');
-        const rateEl = document.getElementById('stat-rate');
-        const masteryEl = document.getElementById('stat-mastery');
+        // 更新Tab状态
+        document.querySelectorAll('.tabs .tab').forEach(tab => {
+            tab.classList.remove('active');
+            if ((mode === 'content' && tab.textContent.includes('按内容')) || 
+                (mode === 'time' && tab.textContent.includes('按时间'))) {
+                tab.classList.add('active');
+            }
+        });
         
-        if (hoursEl) hoursEl.textContent = stats.totalHours;
-        if (contentsEl) contentsEl.textContent = stats.totalContents;
-        if (rateEl) rateEl.textContent = stats.completedRate + '%';
-        if (masteryEl) masteryEl.textContent = stats.avgMastery;
+        const container = document.getElementById('stats-content');
+        if (!container) return;
+        
+        if (mode === 'content') {
+            container.innerHTML = await this.getStatsByContent();
+        } else {
+            container.innerHTML = await this.getStatsByTime();
+        }
+    },
+    
+    /**
+     * 按内容统计
+     */
+    async getStatsByContent() {
+        // 获取统计数据
+        const learnings = await Storage.getLearningsByType(this.currentStatsType);
+        const mockLearnings = learnings.length > 0 ? learnings : [
+            { id: 'l1', name: '认知觉醒', type: '图书', record_count: 10, duration: 300, mastery_score: 85 },
+            { id: 'l2', name: '原则', type: '图书', record_count: 5, duration: 180, mastery_score: 70 }
+        ];
+        
+        // 计算统计数据
+        const totalLearned = mockLearnings.length;
+        const totalDuration = mockLearnings.reduce((sum, l) => sum + (l.duration || 0), 0);
+        const avgMastery = totalLearned > 0 ? (mockLearnings.reduce((sum, l) => sum + (l.mastery_score || 0), 0) / totalLearned).toFixed(1) : 0;
+        
+        return `
+            <div class="tabs mb-4">
+                <button class="tab ${this.currentStatsType === 'book' ? 'active' : ''}" onclick="App.switchStatsType('book')">📚 图书</button>
+                <button class="tab ${this.currentStatsType === 'video' ? 'active' : ''}" onclick="App.switchStatsType('video')">🎬 视频</button>
+                <button class="tab ${this.currentStatsType === 'audio' ? 'active' : ''}" onclick="App.switchStatsType('audio')">🎧 音频</button>
+            </div>
+            
+            <div class="stats-summary">
+                <div class="stat-card">
+                    <div class="stat-number">${totalLearned}</div>
+                    <div class="stat-label">已学习</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number">${Math.round(totalDuration / 60)}h</div>
+                    <div class="stat-label">总时长</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number">${avgMastery}</div>
+                    <div class="stat-label">平均分</div>
+                </div>
+            </div>
+            
+            <div class="learning-list mt-4">
+                ${mockLearnings.map(l => `
+                    <div class="card mb-3">
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <div class="font-semibold">${l.name}</div>
+                                <div class="text-muted" style="font-size: 13px; margin-top: 4px;">
+                                    打卡${l.record_count || 0}天 · ${Math.round((l.duration || 0) / 60)}h · 评分${l.mastery_score || 0}分
+                                </div>
+                            </div>
+                            <select class="form-select" style="width: auto; height: 36px; font-size: 13px;" onchange="App.updateLearningStatus('${l.id}', this.value)">
+                                <option value="learning" ${(l.status || 'learning') === 'learning' ? 'selected' : ''}>学习中</option>
+                                <option value="completed" ${l.status === 'completed' ? 'selected' : ''}>已完成</option>
+                            </select>
+                        </div>
+                    </div>
+                `).join('')}
+            </div>
+        `;
+    },
+    
+    /**
+     * 切换统计类型
+     */
+    async switchStatsType(type) {
+        this.currentStatsType = type;
+        const container = document.getElementById('stats-content');
+        if (container) {
+            container.innerHTML = await this.getStatsByContent();
+        }
+    },
+    
+    /**
+     * 按时间统计
+     */
+    async getStatsByTime() {
+        const year = this.statsCurrentMonth.getFullYear();
+        const month = this.statsCurrentMonth.getMonth() + 1;
+        
+        return `
+            <div class="calendar-view">
+                <div class="calendar-header">
+                    <button onclick="App.prevStatsMonth()">‹</button>
+                    <span id="stats-calendar-title">${year}年${month}月</span>
+                    <button onclick="App.nextStatsMonth()">›</button>
+                </div>
+                
+                <div class="calendar-weekdays">
+                    <div>日</div><div>一</div><div>二</div><div>三</div>
+                    <div>四</div><div>五</div><div>六</div>
+                </div>
+                
+                <div class="calendar-days" id="stats-calendar-days">
+                    <!-- 日期格子 -->
+                </div>
+            </div>
+            
+            <div id="daily-stats" class="mt-4">
+                <div class="text-muted text-center" style="padding: 30px;">
+                    点击日期查看当日学习记录
+                </div>
+            </div>
+        `;
+    },
+    
+    /**
+     * 上个月
+     */
+    prevStatsMonth() {
+        this.statsCurrentMonth.setMonth(this.statsCurrentMonth.getMonth() - 1);
+        this.renderStatsCalendar();
+    },
+    
+    /**
+     * 下个月
+     */
+    nextStatsMonth() {
+        this.statsCurrentMonth.setMonth(this.statsCurrentMonth.getMonth() + 1);
+        this.renderStatsCalendar();
+    },
+    
+    /**
+     * 渲染统计日历
+     */
+    async renderStatsCalendar() {
+        const titleEl = document.getElementById('stats-calendar-title');
+        const container = document.getElementById('stats-calendar-days');
+        if (!container) return;
+        
+        const year = this.statsCurrentMonth.getFullYear();
+        const month = this.statsCurrentMonth.getMonth() + 1;
+        
+        if (titleEl) {
+            titleEl.textContent = `${year}年${month}月`;
+        }
+        
+        // 计算日历
+        const firstDay = Utils.getMonthFirstDay(this.statsCurrentMonth);
+        const lastDay = Utils.getMonthLastDay(this.statsCurrentMonth);
+        const startDay = firstDay.getDay();
+        const daysInMonth = lastDay.getDate();
+        
+        // 获取当周高亮
+        const today = new Date();
+        const currentWeek = Utils.getWeekNumber(today);
+        const selectedDate = Utils.getToday();
+        
+        let html = '';
+        
+        // 上月空白
+        const prevMonth = new Date(year, month - 2, 1);
+        const prevMonthDays = Utils.getMonthDays(prevMonth);
+        for (let i = startDay - 1; i >= 0; i--) {
+            html += `<div class="calendar-day other-month">${prevMonthDays - i}</div>`;
+        }
+        
+        // 当月日期
+        for (let day = 1; day <= daysInMonth; day++) {
+            const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+            const dayWeek = Utils.getWeekNumber(new Date(year, month - 1, day));
+            
+            let classes = 'calendar-day';
+            if (dateStr === Utils.getToday()) classes += ' today';
+            if (dayWeek === currentWeek) classes += ' current-week';
+            if (dateStr === selectedDate) classes += ' selected';
+            
+            html += `
+                <div class="${classes}" data-date="${dateStr}" onclick="App.showStatsDateRecords('${dateStr}')">
+                    ${day}
+                </div>
+            `;
+        }
+        
+        // 下月空白
+        const totalCells = startDay + daysInMonth;
+        const remaining = totalCells % 7 === 0 ? 0 : 7 - (totalCells % 7);
+        for (let i = 1; i <= remaining; i++) {
+            html += `<div class="calendar-day other-month">${i}</div>`;
+        }
+        
+        container.innerHTML = html;
+    },
+    
+    /**
+     * 显示某日统计记录
+     */
+    async showStatsDateRecords(dateStr) {
+        const container = document.getElementById('daily-stats');
+        if (!container) return;
+        
+        // 更新选中状态
+        document.querySelectorAll('.calendar-day').forEach(el => el.classList.remove('selected'));
+        const selected = document.querySelector(`.calendar-day[data-date="${dateStr}"]`);
+        if (selected) selected.classList.add('selected');
+        
+        // 获取当日记录
+        const records = await Storage.getRecordsByDate(dateStr);
+        
+        if (records.length === 0) {
+            container.innerHTML = `
+                <div class="card">
+                    <div class="text-muted text-center" style="padding: 20px;">
+                        ${dateStr} 暂无学习记录
+                    </div>
+                </div>
+            `;
+        } else {
+            container.innerHTML = `
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-title">${dateStr} 学习记录</div>
+                    </div>
+                    ${records.map(r => `
+                        <div class="list-item">
+                            <div class="list-item-icon">
+                                ${r.type === '图书' ? '📚' : r.type === '视频' ? '🎬' : '🎧'}
+                            </div>
+                            <div class="list-item-content">
+                                <div class="list-item-title">${r.content_name}</div>
+                                <div class="list-item-desc">${r.content_desc || ''} · ${r.duration}分钟</div>
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            `;
+        }
+    },
+    
+    /**
+     * 更新学习状态
+     */
+    async updateLearningStatus(learningId, status) {
+        await Storage.updateLearningStatus(learningId, status);
+        Utils.showToast('状态已更新', 'success');
     }
 };
 

@@ -151,15 +151,6 @@ const Router = {
                     </svg>
                     <span>录入</span>
                 </a>
-                <a class="nav-item ${route === 'calendar' ? 'active' : ''}" href="#calendar">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
-                        <line x1="16" y1="2" x2="16" y2="6"></line>
-                        <line x1="8" y1="2" x2="8" y2="6"></line>
-                        <line x1="3" y1="10" x2="21" y2="10"></line>
-                    </svg>
-                    <span>日历</span>
-                </a>
                 <a class="nav-item ${route === 'task' ? 'active' : ''}" href="#task" style="position: relative;">
                     ${taskBadgeHtml}
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -173,6 +164,21 @@ const Router = {
                         <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
                     </svg>
                     <span>档案</span>
+                </a>
+                <a class="nav-item ${route === 'knowledge' ? 'active' : ''}" href="#knowledge">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
+                        <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path>
+                    </svg>
+                    <span>知识库</span>
+                </a>
+                <a class="nav-item ${route === 'stats' ? 'active' : ''}" href="#stats">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="18" y1="20" x2="18" y2="10"></line>
+                        <line x1="12" y1="20" x2="12" y2="4"></line>
+                        <line x1="6" y1="20" x2="6" y2="14"></line>
+                    </svg>
+                    <span>统计</span>
                 </a>
             </nav>
             
@@ -190,15 +196,6 @@ const Router = {
                         <line x1="5" y1="12" x2="19" y2="12"></line>
                     </svg>
                     录入
-                </a>
-                <a class="nav-item ${route === 'calendar' ? 'active' : ''}" href="#calendar">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <rect x="3" y="4" width="18" height="18" rx="2"></rect>
-                        <line x1="16" y1="2" x2="16" y2="6"></line>
-                        <line x1="8" y1="2" x2="8" y2="6"></line>
-                        <line x1="3" y1="10" x2="21" y2="10"></line>
-                    </svg>
-                    日历
                 </a>
                 <a class="nav-item ${route === 'task' ? 'active' : ''}" href="#task" style="position: relative;">
                     ${taskBadgeHtml}
@@ -305,12 +302,6 @@ const Router = {
                 <div class="page-subtitle">记录今天的学习内容</div>
             </div>
             
-            <!-- 录入方式切换 -->
-            <div class="tabs mb-4">
-                <button class="tab active" data-tab="manual">手动录入</button>
-                <button class="tab" data-tab="voice">语音录入</button>
-            </div>
-            
             <!-- 手动录入表单 -->
             <div id="manual-form">
                 <div class="card">
@@ -331,6 +322,12 @@ const Router = {
                         <span id="voice-tip" class="text-muted" style="font-size: 13px;">
                             点击麦克风开始说话，自动识别学习内容
                         </span>
+                    </div>
+                    
+                    <!-- 语音转文字结果显示 -->
+                    <div id="voice-result" class="voice-result mb-4" style="display: none; padding: 12px; background: var(--bg-secondary); border-radius: var(--radius-md);">
+                        <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 4px;">识别结果：</div>
+                        <div id="voice-result-text" style="font-size: 14px; color: var(--text-secondary);"></div>
                     </div>
                     
                     <div class="form-item">
@@ -360,32 +357,6 @@ const Router = {
                     <button class="btn btn-primary btn-lg" style="width: 100%;" onclick="App.submitRecord()">
                         提交记录
                     </button>
-                </div>
-            </div>
-            
-            <!-- 语音录入（备用界面） -->
-            <div id="voice-form" style="display: none;">
-                <div class="card text-center">
-                    <div class="mb-6">
-                        <button class="record-btn" id="record-btn" onclick="App.toggleRecording()">
-                            <svg viewBox="0 0 24 24" fill="currentColor">
-                                <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"></path>
-                                <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"></path>
-                            </svg>
-                        </button>
-                    </div>
-                    <div class="text-muted mb-4" id="record-status">点击开始录音</div>
-                    <div class="text-muted" id="record-tip" style="font-size: 13px;">
-                        录音将自动转文字并由AI解析拆分
-                    </div>
-                    
-                    <!-- 转写结果预览 -->
-                    <div id="transcript-result" class="mt-6" style="display: none;">
-                        <div class="card" style="text-align: left; background: var(--bg-secondary);">
-                            <div class="font-medium mb-2">转写结果</div>
-                            <div id="transcript-text" style="font-size: 14px; color: var(--text-secondary);"></div>
-                        </div>
-                    </div>
                 </div>
             </div>
         `;
@@ -437,21 +408,26 @@ const Router = {
     getTaskContent() {
         return `
             <div class="page-header">
-                <div class="page-title">复习任务</div>
-                <div class="page-subtitle">按时复习，事半功倍</div>
+                <div class="page-title">任务</div>
+            </div>
+            
+            <div class="tabs mb-4">
+                <button class="tab active" onclick="App.switchTaskType('daily')">日任务</button>
+                <button class="tab" onclick="App.switchTaskType('weekly')">周任务</button>
             </div>
             
             <div id="task-list">
                 <div class="loading"><div class="spinner"></div></div>
             </div>
             
-            <!-- 浮动添加任务按钮 -->
-            <button class="fab" onclick="App.showAddTaskModal()" title="添加任务">
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <line x1="12" y1="5" x2="12" y2="19"></line>
-                    <line x1="5" y1="12" x2="19" y2="12"></line>
-                </svg>
-            </button>
+            <!-- 已过期任务统计 -->
+            <div class="expired-tasks-section" id="expired-tasks-section" style="display: none;">
+                <div class="expired-title">已过期任务</div>
+                <div class="expired-stats">
+                    <span class="expired-item">周任务 <span class="count" id="expired-weekly-count">0/0</span></span>
+                    <span class="expired-item">日任务 <span class="count" id="expired-daily-count">0/0</span></span>
+                </div>
+            </div>
         `;
     },
 
@@ -475,19 +451,57 @@ const Router = {
      * 学习档案页内容
      */
     getArchiveContent() {
+        const currentYear = new Date().getFullYear();
+        const currentMonth = new Date().getMonth() + 1;
+        
+        // 生成年份选项（当前年前后5年）
+        let yearOptions = '';
+        for (let y = currentYear - 5; y <= currentYear; y++) {
+            yearOptions += `<option value="${y}" ${y === currentYear ? 'selected' : ''}>${y}年</option>`;
+        }
+        
+        // 生成月份选项
+        let monthOptions = '';
+        for (let m = 1; m <= 12; m++) {
+            monthOptions += `<option value="${m}" ${m === currentMonth ? 'selected' : ''}>${m}月</option>`;
+        }
+        
         return `
             <div class="page-header">
                 <div class="page-title">学习档案</div>
                 <div class="page-subtitle">回顾学习历程，见证成长</div>
             </div>
             
-            <div class="tabs">
+            <div class="tabs archive-tabs">
                 <button class="tab active" data-tab="by-content" onclick="App.switchArchiveTab('by-content')">按内容查看</button>
                 <button class="tab" data-tab="by-date" onclick="App.switchArchiveTab('by-date')">按日期查看</button>
             </div>
             
             <div id="archive-content">
                 <div class="loading"><div class="spinner"></div></div>
+            </div>
+            
+            <!-- 按日期查看：年月日选择器 -->
+            <div id="date-selector" class="date-selector" style="display: none;">
+                <div class="date-picker-row">
+                    <select id="year-select" onchange="App.updateArchiveCalendar()">
+                        ${yearOptions}
+                    </select>
+                    <select id="month-select" onchange="App.updateArchiveCalendar()">
+                        ${monthOptions}
+                    </select>
+                    <select id="day-select" onchange="App.showArchiveDateRecords()">
+                        <!-- 日期选项由JS动态生成 -->
+                    </select>
+                </div>
+                
+                <div class="calendar-picker" id="archive-calendar">
+                    <!-- 月历 -->
+                </div>
+                
+                <div id="archive-date-records">
+                    <!-- 当天记录 -->
+                </div>
             </div>
         `;
     },
@@ -499,31 +513,13 @@ const Router = {
         return `
             <div class="page-header">
                 <div class="page-title">知识库</div>
-                <div class="page-subtitle">整理知识体系，构建学习地图</div>
+                <div class="page-subtitle">已完成的学习内容</div>
             </div>
             
-            <!-- 知识库搜索框 -->
-            <div class="card mb-4">
-                <div class="search-box">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <circle cx="11" cy="11" r="8"></circle>
-                        <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-                    </svg>
-                    <input type="text" id="knowledge-search" placeholder="搜索知识库..." oninput="App.searchKnowledge(this.value)">
-                </div>
-            </div>
-            
-            <div class="card mb-4">
-                <div class="flex items-center justify-between">
-                    <span class="font-medium">我的知识库</span>
-                    <button class="btn btn-sm btn-outline" onclick="App.addKnowledge()">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <line x1="12" y1="5" x2="12" y2="19"></line>
-                            <line x1="5" y1="12" x2="19" y2="12"></line>
-                        </svg>
-                        新建
-                    </button>
-                </div>
+            <div class="tabs archive-tabs mb-4">
+                <button class="tab active" onclick="App.switchKnowledgeType('book')">📚 图书</button>
+                <button class="tab" onclick="App.switchKnowledgeType('video')">🎬 视频</button>
+                <button class="tab" onclick="App.switchKnowledgeType('audio')">🎧 音频</button>
             </div>
             
             <div id="knowledge-list">
@@ -539,73 +535,15 @@ const Router = {
         return `
             <div class="page-header">
                 <div class="page-title">学习统计</div>
-                <div class="page-subtitle">数据驱动，持续进步</div>
             </div>
             
-            <div class="stats-grid mb-6">
-                <div class="stat-card">
-                    <div class="stat-value" id="stat-hours">0</div>
-                    <div class="stat-label">总学习时长（小时）</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-value" id="stat-contents">0</div>
-                    <div class="stat-label">学习内容数</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-value" id="stat-rate">0%</div>
-                    <div class="stat-label">考核完成率</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-value" id="stat-mastery">0</div>
-                    <div class="stat-label">平均掌握度</div>
-                </div>
+            <div class="tabs mb-4">
+                <button class="tab active" onclick="App.switchStatsMode('content')">按内容统计</button>
+                <button class="tab" onclick="App.switchStatsMode('time')">按时间统计</button>
             </div>
             
-            <div class="card mb-4">
-                <div class="card-header">
-                    <div class="card-title">本周学习趋势</div>
-                </div>
-                <div class="progress-bar mb-2">
-                    <div class="progress-fill" style="width: 65%;"></div>
-                </div>
-                <div class="flex justify-between text-muted" style="font-size: 12px;">
-                    <span>周一</span>
-                    <span>周二</span>
-                    <span>周三</span>
-                    <span>周四</span>
-                    <span>周五</span>
-                    <span>周六</span>
-                    <span>周日</span>
-                </div>
-            </div>
-            
-            <div class="card">
-                <div class="card-header">
-                    <div class="card-title">学习内容分布</div>
-                </div>
-                <div id="content-distribution">
-                    <div class="flex items-center justify-between mb-2">
-                        <span class="tag tag-primary">📚 图书</span>
-                        <span class="font-medium">45%</span>
-                    </div>
-                    <div class="progress-bar mb-3">
-                        <div class="progress-fill" style="width: 45%;"></div>
-                    </div>
-                    <div class="flex items-center justify-between mb-2">
-                        <span class="tag tag-success">🎬 视频</span>
-                        <span class="font-medium">35%</span>
-                    </div>
-                    <div class="progress-bar mb-3">
-                        <div class="progress-fill" style="width: 35%; background: var(--success);"></div>
-                    </div>
-                    <div class="flex items-center justify-between mb-2">
-                        <span class="tag tag-info">🎧 音频文稿</span>
-                        <span class="font-medium">20%</span>
-                    </div>
-                    <div class="progress-bar">
-                        <div class="progress-fill" style="width: 20%; background: #3B82F6;"></div>
-                    </div>
-                </div>
+            <div id="stats-content">
+                <div class="loading"><div class="spinner"></div></div>
             </div>
         `;
     },
