@@ -222,8 +222,7 @@ const Utils = {
         if (diff < 86400) return Math.floor(diff / 3600) + '小时前';
         if (diff < 604800) return Math.floor(diff / 86400) + '天前';
         return Utils.formatDate(date, 'YYYY-MM-DD');
-    }
-};
+    },
 
     // ============ 任务系统辅助函数 ============
 
@@ -298,3 +297,4 @@ const Utils = {
         };
         return typeMap[type] || type;
     }
+};
