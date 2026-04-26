@@ -13,6 +13,10 @@ const App = {
     mediaRecorder: null,
     audioChunks: [],
     
+    // 语音识别状态
+    voiceRecognition: null,
+    voiceTranscript: '',
+    
     /**
      * 初始化应用
      */
@@ -410,6 +414,319 @@ const App = {
         document.querySelector('.tab[data-tab="manual"]').click();
     },
     
+    // ============ 语音录入（新） ============
+    
+    /**
+     * 切换语音录入状态（表单内按钮）
+     */
+    async toggleVoiceInput() {
+        if (this.voiceRecognition) {
+            // 停止录音
+            this.stopVoiceInput();
+        } else {
+            // 开始录音
+            await this.startVoiceInput();
+        }
+    },
+    
+    /**
+     * 开始语音录入
+     */
+    async startVoiceInput() {
+        // 检查浏览器支持
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (!SpeechRecognition) {
+            Utils.showToast('您的浏览器不支持语音识别，请使用Chrome浏览器', 'error');
+            return;
+        }
+        
+        try {
+            // 请求麦克风权限
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            stream.getTracks().forEach(track => track.stop());
+            
+            // 创建语音识别对象
+            this.voiceRecognition = new SpeechRecognition();
+            this.voiceRecognition.lang = 'zh-CN';
+            this.voiceRecognition.continuous = true;
+            this.voiceRecognition.interimResults = true;
+            
+            this.voiceTranscript = '';
+            
+            // 更新UI状态
+            const status = document.getElementById('voice-status');
+            const tip = document.getElementById('voice-tip');
+            if (status) {
+                status.style.display = 'inline';
+                status.textContent = '🎤 正在录音...';
+            }
+            if (tip) {
+                tip.textContent = '请说出学习内容，如"我今天读了《原则》第三章，学了30分钟"';
+            }
+            
+            // 更新按钮状态
+            const btn = document.querySelector('.voice-input-section .btn');
+            if (btn) {
+                btn.classList.add('recording');
+                btn.innerHTML = `
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="6" y="6" width="12" height="12" rx="2"></rect>
+                    </svg>
+                    停止录音
+                `;
+            }
+            
+            // 识别结果
+            this.voiceRecognition.onresult = (event) => {
+                let interimTranscript = '';
+                for (let i = event.resultIndex; i < event.results.length; i++) {
+                    const transcript = event.results[i][0].transcript;
+                    if (event.results[i].isFinal) {
+                        this.voiceTranscript += transcript;
+                    } else {
+                        interimTranscript = transcript;
+                    }
+                }
+                
+                // 实时显示识别内容
+                if (status) {
+                    status.textContent = '🎤 ' + (this.voiceTranscript || interimTranscript || '正在聆听...');
+                }
+            };
+            
+            this.voiceRecognition.onerror = (event) => {
+                console.error('语音识别错误:', event.error);
+                Utils.showToast('语音识别出错：' + event.error, 'error');
+                this.stopVoiceInput();
+            };
+            
+            this.voiceRecognition.onend = () => {
+                // 语音识别自动停止后，处理结果
+                if (this.voiceTranscript) {
+                    this.processVoiceTranscript(this.voiceTranscript);
+                } else {
+                    Utils.showToast('未识别到语音内容，请重试', 'default');
+                    this.stopVoiceInput();
+                }
+            };
+            
+            // 开始识别
+            this.voiceRecognition.start();
+            
+            Utils.showToast('🎤 开始录音，请说话...', 'default');
+            
+        } catch (err) {
+            console.error('语音录入失败:', err);
+            Utils.showToast('无法访问麦克风，请检查权限设置', 'error');
+            this.voiceRecognition = null;
+        }
+    },
+    
+    /**
+     * 停止语音录入
+     */
+    stopVoiceInput() {
+        if (this.voiceRecognition) {
+            this.voiceRecognition.stop();
+            this.voiceRecognition = null;
+        }
+        
+        // 恢复UI状态
+        const status = document.getElementById('voice-status');
+        const tip = document.getElementById('voice-tip');
+        if (status) {
+            status.style.display = 'none';
+        }
+        if (tip) {
+            tip.textContent = '点击麦克风开始说话，自动识别学习内容';
+        }
+        
+        // 恢复按钮状态
+        const btn = document.querySelector('.voice-input-section .btn');
+        if (btn) {
+            btn.classList.remove('recording');
+            btn.innerHTML = `
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+                    <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+                    <line x1="12" y1="19" x2="12" y2="23"></line>
+                    <line x1="8" y1="23" x2="16" y2="23"></line>
+                </svg>
+                语音录入
+            `;
+        }
+    },
+    
+    /**
+     * 处理语音转写结果
+     */
+    async processVoiceTranscript(transcript) {
+        Utils.showToast('正在AI解析...', 'default');
+        
+        // 调用AI提取结构化信息
+        try {
+            const info = await this.extractLearningInfo(transcript);
+            
+            // 自动填充表单
+            this.fillRecordForm(info);
+            
+            Utils.showToast('✅ 已自动填入信息，请确认后保存', 'success');
+            
+        } catch (error) {
+            console.error('AI解析失败:', error);
+            Utils.showToast('语音解析失败，请手动填写', 'error');
+        }
+        
+        // 重置状态
+        this.voiceTranscript = '';
+    },
+    
+    /**
+     * AI提取学习信息
+     */
+    async extractLearningInfo(voiceText) {
+        const DEEPSEEK_API_KEY = localStorage.getItem('deepseek_api_key') || 'sk-dda01297df2c4048b80578fe86e7946b';
+        
+        const prompt = `请从以下语音文本中提取学习信息，返回JSON格式：
+
+语音文本："${voiceText}"
+
+请提取以下字段：
+- type: 学习类型（book=图书, video=视频, audio=音频文稿），如果用户说"书/读了书/看书"则为book，"视频/看了视频"则为video，"音频/听了音频/播客"则为audio
+- title: 学习内容名称（书名/课程名/章节名等）
+- duration: 学习时长（分钟数，只返回数字）
+- summary: 内容简介（30字以内）
+
+返回格式示例：
+{
+  "type": "book",
+  "title": "《原则》第三章",
+  "duration": 30,
+  "summary": "系统化思维在管理中的应用"
+}
+
+注意：只返回JSON，不要其他任何文字。`;
+
+        try {
+            const response = await fetch('https://api.deepseek.com/v1/chat/completions', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${DEEPSEEK_API_KEY}`
+                },
+                body: JSON.stringify({
+                    model: 'deepseek-chat',
+                    messages: [
+                        { role: 'user', content: prompt }
+                    ],
+                    temperature: 0.3,
+                    max_tokens: 200
+                })
+            });
+            
+            if (!response.ok) {
+                throw new Error(`API调用失败: ${response.status}`);
+            }
+            
+            const data = await response.json();
+            const content = data.choices[0].message.content;
+            
+            // 解析JSON
+            const jsonMatch = content.match(/\{[\s\S]*\}/);
+            if (jsonMatch) {
+                return JSON.parse(jsonMatch[0]);
+            }
+            
+            throw new Error('无法解析AI返回结果');
+            
+        } catch (error) {
+            console.error('AI提取失败:', error);
+            
+            // 降级处理：使用简单规则提取
+            return this.fallbackExtract(voiceText);
+        }
+    },
+    
+    /**
+     * 降级提取（简单规则）
+     */
+    fallbackExtract(text) {
+        const typeMap = {
+            '书': '图书',
+            '图书': '图书',
+            '视频': '视频',
+            '看了视频': '视频',
+            '课程': '视频',
+            '音频': '音频文稿',
+            '播客': '音频文稿',
+            '听了': '音频文稿'
+        };
+        
+        let type = '图书'; // 默认
+        for (const [key, value] of Object.entries(typeMap)) {
+            if (text.includes(key)) {
+                type = value;
+                break;
+            }
+        }
+        
+        // 提取书名（简单匹配）
+        const titleMatch = text.match(/[《"]([^》"]+)[》"]/);
+        const title = titleMatch ? titleMatch[1] : '';
+        
+        // 提取时长
+        const durationMatch = text.match(/(\d+)\s*分钟/);
+        const duration = durationMatch ? parseInt(durationMatch[1]) : 30;
+        
+        return {
+            type: type,
+            title: title,
+            duration: duration,
+            summary: text.substring(0, 30)
+        };
+    },
+    
+    /**
+     * 填充录入表单
+     */
+    fillRecordForm(info) {
+        // 类型映射
+        const typeMap = {
+            'book': '图书',
+            'video': '视频',
+            'audio': '音频文稿'
+        };
+        
+        const type = typeMap[info.type] || info.type || '图书';
+        
+        // 填充表单
+        const typeSelect = document.getElementById('record-type');
+        if (typeSelect) {
+            // 找到匹配的选项
+            for (let i = 0; i < typeSelect.options.length; i++) {
+                if (typeSelect.options[i].text.includes(type) || typeSelect.options[i].value === type) {
+                    typeSelect.selectedIndex = i;
+                    break;
+                }
+            }
+        }
+        
+        const nameInput = document.getElementById('content-name');
+        if (nameInput && info.title) {
+            nameInput.value = info.title;
+        }
+        
+        const descInput = document.getElementById('content-desc');
+        if (descInput && info.summary) {
+            descInput.value = info.summary;
+        }
+        
+        const durationInput = document.getElementById('duration');
+        if (durationInput && info.duration) {
+            durationInput.value = info.duration;
+        }
+    },
+    
     // ============ 任务相关 ============
     
     // 任务列表数据
@@ -474,82 +791,6 @@ const App = {
                 ` : ''}
             </div>
         `).join('');
-    },
-    
-    /**
-     * 显示添加任务弹窗
-     */
-    showAddTaskModal() {
-        const overlay = document.createElement('div');
-        overlay.className = 'modal-overlay active';
-        overlay.id = 'add-task-modal';
-        
-        overlay.innerHTML = `
-            <div class="modal-content" style="width: 360px;">
-                <button class="modal-close" onclick="App.closeAddTaskModal()">&times;</button>
-                <div class="font-semibold mb-4" style="font-size: 18px;">添加新任务</div>
-                
-                <div class="form-item mb-4">
-                    <label class="form-label">任务标题</label>
-                    <input type="text" class="form-input" id="new-task-title" placeholder="请输入任务标题">
-                </div>
-                
-                <div class="form-item mb-4">
-                    <label class="form-label">学习来源</label>
-                    <select class="form-input form-select" id="new-task-source">
-                        <option value="图书">📚 图书</option>
-                        <option value="视频">🎬 视频</option>
-                        <option value="音频文稿">🎧 音频文稿</option>
-                        <option value="综合">📝 综合</option>
-                    </select>
-                </div>
-                
-                <div class="form-item mb-4">
-                    <label class="form-label">截止日期</label>
-                    <input type="date" class="form-input" id="new-task-date" value="${Utils.getToday()}">
-                </div>
-                
-                <button class="btn btn-primary" style="width: 100%;" onclick="App.addTask()">添加任务</button>
-            </div>
-        `;
-        
-        overlay.onclick = (e) => { if (e.target === overlay) App.closeAddTaskModal(); };
-        document.body.appendChild(overlay);
-    },
-    
-    /**
-     * 关闭添加任务弹窗
-     */
-    closeAddTaskModal() {
-        const modal = document.getElementById('add-task-modal');
-        if (modal) modal.remove();
-    },
-    
-    /**
-     * 添加新任务
-     */
-    async addTask() {
-        const title = document.getElementById('new-task-title').value.trim();
-        const source = document.getElementById('new-task-source').value;
-        const dueDate = document.getElementById('new-task-date').value;
-        
-        if (!title) {
-            Utils.showToast('请输入任务标题', 'error');
-            return;
-        }
-        
-        const newTask = {
-            title: title,
-            source: source,
-            dueDate: dueDate
-        };
-        
-        // 保存到存储
-        await Storage.addTask(newTask);
-        
-        Utils.showToast('任务添加成功', 'success');
-        this.closeAddTaskModal();
-        this.loadTasks();
     },
     
     /**
@@ -631,18 +872,6 @@ const App = {
                                 <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 4px;">作答内容：</div>
                                 <div id="answer-content-${q.id}" style="font-size: 14px;"></div>
                             </div>
-                        </div>
-                    </div>
-                    
-                    <div class="mt-4">
-                        <label>自我评分（1-10星）：</label>
-                        <div class="star-rating mt-2" id="star-rating-${q.id}" data-question="${q.id}">
-                            ${[1,2,3,4,5,6,7,8,9,10].map(n => `
-                                <svg class="star" data-score="${n}" onclick="App.setScore('${q.id}', ${n})" 
-                                     viewBox="0 0 24 24" fill="currentColor">
-                                    <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
-                                </svg>
-                            `).join('')}
                         </div>
                     </div>
                 </div>
@@ -1040,25 +1269,92 @@ const App = {
     
     // ============ 学习档案相关 ============
     
+    // 当前档案Tab
+    currentArchiveTab: 'by-content',
+    
+    // 档案日历状态
+    archiveCalendarYear: new Date().getFullYear(),
+    archiveCalendarMonth: new Date().getMonth() + 1,
+    
+    /**
+     * 切换档案Tab
+     */
+    async switchArchiveTab(tab) {
+        this.currentArchiveTab = tab;
+        
+        // 更新Tab状态
+        document.querySelectorAll('.archive-tabs .tab, .tabs .tab').forEach(t => {
+            if (t.dataset.tab === tab) {
+                t.classList.add('active');
+            } else {
+                t.classList.remove('active');
+            }
+        });
+        
+        // 渲染内容
+        if (tab === 'by-content') {
+            await this.loadArchiveByContent();
+        } else {
+            await this.loadArchiveByDate();
+        }
+    },
+    
     /**
      * 加载学习档案
      */
     async loadArchive() {
+        // 默认加载按内容查看
+        await this.loadArchiveByContent();
+    },
+    
+    /**
+     * 按内容查看
+     */
+    async loadArchiveByContent() {
         const container = document.getElementById('archive-content');
         if (!container) return;
         
-        const activeTab = document.querySelector('.tab.active')?.dataset.tab || 'by-content';
+        // 添加二级Tab
+        container.innerHTML = `
+            <div class="tabs mb-4" style="background: transparent; padding: 0;">
+                <button class="tab active" data-type="all" onclick="App.loadArchiveList('all')">全部</button>
+                <button class="tab" data-type="book" onclick="App.loadArchiveList('book')">📚 图书</button>
+                <button class="tab" data-type="video" onclick="App.loadArchiveList('video')">🎬 视频</button>
+                <button class="tab" data-type="audio" onclick="App.loadArchiveList('audio')">🎧 音频</button>
+            </div>
+            <div id="archive-list">
+                <div class="loading"><div class="spinner"></div></div>
+            </div>
+        `;
         
-        if (activeTab === 'by-content') {
-            // 按内容查看
-            const mockBooks = [
-                { id: 'book_1', name: '认知觉醒', type: '图书', recordCount: 12, masteryScore: 7.5, status: 'learning' },
-                { id: 'book_2', name: 'Python编程', type: '视频', recordCount: 8, masteryScore: 9, status: 'learning' },
-                { id: 'book_3', name: '英语听力', type: '音频文稿', recordCount: 15, masteryScore: 8, status: 'completed' }
-            ];
+        // 加载全部内容
+        await this.loadArchiveList('all');
+    },
+    
+    /**
+     * 加载档案列表
+     */
+    async loadArchiveList(type = 'all') {
+        const container = document.getElementById('archive-list');
+        if (!container) return;
+        
+        // 更新Tab状态
+        container.parentElement.querySelectorAll('.tab').forEach(t => {
+            t.classList.toggle('active', t.dataset.type === type);
+        });
+        
+        container.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+        
+        try {
+            let learnings;
+            if (type === 'all') {
+                const index = await Storage.getBookIndex();
+                learnings = index.items || [];
+            } else {
+                learnings = await Storage.getLearningsByType(type);
+            }
             
-            // 只有当真正没有数据时才显示空状态
-            if (!mockBooks || mockBooks.length === 0) {
+            if (learnings.length === 0) {
                 container.innerHTML = `
                     <div class="empty-state">
                         <div class="empty-icon">
@@ -1073,89 +1369,385 @@ const App = {
                 return;
             }
             
-            container.innerHTML = mockBooks.map(book => `
-                <div class="card mb-4" onclick="App.toggleBookDetail('${book.id}')">
-                    <div class="flex items-center gap-4">
-                        <div class="list-item-icon" style="width: 56px; height: 56px; font-size: 24px;">
-                            ${book.type === '图书' ? '📚' : book.type === '视频' ? '🎬' : '🎧'}
+            // 获取每个学习内容的统计数据
+            const learningsWithStats = await Promise.all(learnings.map(async (learning) => {
+                const records = await Storage.getRecordsByLearningName(learning.name);
+                const answers = await Storage.getAnswersByLearningName(learning.name);
+                
+                // 计算统计数据
+                const uniqueDays = [...new Set(records.map(r => r.date))];
+                const totalDuration = records.reduce((sum, r) => sum + (r.duration || 0), 0);
+                const avgScore = answers.length > 0 
+                    ? (answers.reduce((sum, a) => sum + (a.avgScore || 0), 0) / answers.length).toFixed(1)
+                    : 0;
+                
+                return {
+                    ...learning,
+                    days: uniqueDays.length,
+                    times: records.length,
+                    duration: totalDuration,
+                    avgScore: avgScore
+                };
+            }));
+            
+            // 按学习次数排序
+            learningsWithStats.sort((a, b) => b.times - a.times);
+            
+            const typeIcon = {
+                '图书': '📚',
+                '视频': '🎬',
+                '音频文稿': '🎧'
+            };
+            
+            container.innerHTML = learningsWithStats.map(learning => `
+                <div class="learning-item card" onclick="App.showArchiveDetail('${encodeURIComponent(learning.name)}')">
+                    <div class="learning-icon">${typeIcon[learning.type] || '📖'}</div>
+                    <div class="learning-info">
+                        <div class="learning-title">${this.escapeHtml(learning.name)}</div>
+                        <div class="learning-stats">
+                            <span class="stat-item">📅 打卡${learning.days}天</span>
+                            <span class="stat-item">📊 共${learning.times}次</span>
+                            <span class="stat-item">⏱ ${learning.duration}分钟</span>
+                            ${learning.avgScore > 0 ? `<span class="stat-item">⭐ 均分${learning.avgScore}</span>` : ''}
+                            <span class="badge ${learning.status === 'completed' ? 'badge-success' : 'badge-warning'}">
+                                ${learning.status === 'completed' ? '✅ 已完成' : '📖 学习中'}
+                            </span>
                         </div>
-                        <div class="flex-1">
-                            <div class="font-semibold">${book.name}</div>
-                            <div class="flex items-center gap-2 mt-2">
-                                <span class="tag tag-primary">${book.type}</span>
-                                <span class="text-muted" style="font-size: 12px;">录入${book.recordCount}次</span>
-                                <span class="tag ${book.status === 'completed' ? 'tag-success' : 'tag-warning'}">
-                                    ${book.status === 'completed' ? '已完成' : '学习中'}
+                    </div>
+                    <div class="learning-arrow">›</div>
+                </div>
+            `).join('');
+            
+        } catch (error) {
+            console.error('加载档案列表失败:', error);
+            container.innerHTML = `
+                <div class="empty-state">
+                    <div class="empty-title">加载失败</div>
+                    <div class="empty-desc">请稍后重试</div>
+                </div>
+            `;
+        }
+    },
+    
+    /**
+     * 显示档案详情
+     */
+    async showArchiveDetail(contentName) {
+        const name = decodeURIComponent(contentName);
+        
+        try {
+            const learning = await Storage.getLearningByName(name);
+            const records = await Storage.getRecordsByLearningName(name);
+            const answers = await Storage.getAnswersByLearningName(name);
+            
+            // 计算统计
+            const uniqueDays = [...new Set(records.map(r => r.date))];
+            const totalDuration = records.reduce((sum, r) => sum + (r.duration || 0), 0);
+            const avgScore = answers.length > 0 
+                ? (answers.reduce((sum, a) => sum + (a.avgScore || 0), 0) / answers.length).toFixed(1)
+                : '-';
+            
+            const typeIcon = {
+                '图书': '📚',
+                '视频': '🎬',
+                '音频文稿': '🎧'
+            };
+            
+            // 构建详情页HTML
+            const container = document.getElementById('archive-list');
+            container.innerHTML = `
+                <button class="back-btn mb-4" onclick="App.loadArchiveByContent()">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="15 18 9 12 15 6"></polyline>
+                    </svg>
+                    返回列表
+                </button>
+                
+                <div class="card mb-4">
+                    <div class="flex items-center gap-4">
+                        <div class="learning-icon" style="font-size: 48px;">
+                            ${typeIcon[learning?.type] || '📖'}
+                        </div>
+                        <div>
+                            <div class="font-semibold" style="font-size: 18px;">${this.escapeHtml(name)}</div>
+                            <div class="text-muted mt-2">
+                                <span class="tag tag-primary">${learning?.type || '未知'}</span>
+                                <span class="badge ${learning?.status === 'completed' ? 'badge-success' : 'badge-warning'}">
+                                    ${learning?.status === 'completed' ? '已完成' : '学习中'}
                                 </span>
                             </div>
                         </div>
-                        <div class="text-right">
-                            <div class="text-purple font-semibold">${book.masteryScore}</div>
-                            <div class="text-muted" style="font-size: 12px;">掌握度</div>
-                        </div>
-                    </div>
-                    
-                    <div class="progress-bar mt-4">
-                        <div class="progress-fill" style="width: ${book.masteryScore * 10}%;"></div>
                     </div>
                 </div>
-            `).join('');
-        } else {
-            // 按日期查看
-            const mockDates = [
-                { date: Utils.getToday(), records: [
-                    { name: '认知觉醒', desc: '第三章：元认知', duration: 45 }
-                ]},
-                { date: Utils.getRelativeDate(-1), records: [
-                    { name: 'Python编程', desc: '基础语法', duration: 30 },
-                    { name: '英语听力', desc: 'VOA慢速', duration: 20 }
-                ]},
-                { date: Utils.getRelativeDate(-2), records: [
-                    { name: '认知觉醒', desc: '第二章：潜意识', duration: 50 }
-                ]}
-            ];
+                
+                <div class="stats-cards">
+                    <div class="stat-card">
+                        <div class="stat-number">${uniqueDays.length}</div>
+                        <div class="stat-label">打卡天数</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-number">${records.length}</div>
+                        <div class="stat-label">打卡次数</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-number">${totalDuration}</div>
+                        <div class="stat-label">总时长(分钟)</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-number">${avgScore}</div>
+                        <div class="stat-label">平均分</div>
+                    </div>
+                </div>
+                
+                <h3 class="mb-4">打卡记录</h3>
+                ${records.length === 0 ? `
+                    <div class="empty-state">
+                        <div class="empty-desc">暂无打卡记录</div>
+                    </div>
+                ` : records.sort((a, b) => b.date.localeCompare(a.date)).map(record => {
+                    const answer = answers.find(a => a.date === record.date);
+                    return `
+                        <div class="card mb-3">
+                            <div class="flex justify-between items-center mb-2">
+                                <span class="font-medium">${record.date}</span>
+                                <span class="text-muted">${record.duration || 0}分钟</span>
+                            </div>
+                            <div class="text-muted mb-2" style="font-size: 13px;">
+                                ${this.escapeHtml(record.content_desc || record.content_name)}
+                            </div>
+                            ${answer ? `
+                                <div class="flex items-center gap-2">
+                                    <span class="badge badge-success">已答题</span>
+                                    <span class="text-muted" style="font-size: 13px;">评分: ${answer.avgScore || '-'}</span>
+                                </div>
+                            ` : `
+                                <span class="badge badge-muted">未答题</span>
+                            `}
+                        </div>
+                    `;
+                }).join('')}
+            `;
             
-            // 只有当真正没有数据时才显示空状态
-            if (!mockDates || mockDates.length === 0) {
+        } catch (error) {
+            console.error('加载详情失败:', error);
+            Utils.showToast('加载详情失败', 'error');
+        }
+    },
+    
+    /**
+     * 按日期查看
+     */
+    async loadArchiveByDate() {
+        const container = document.getElementById('archive-content');
+        if (!container) return;
+        
+        container.innerHTML = `
+            <div class="calendar mb-4" id="archive-calendar">
+                <div class="calendar-header">
+                    <div class="calendar-title" id="archive-calendar-title">
+                        ${this.archiveCalendarYear}年${this.archiveCalendarMonth}月
+                    </div>
+                    <div class="calendar-nav">
+                        <button onclick="App.prevArchiveMonth()">‹</button>
+                        <button onclick="App.nextArchiveMonth()">›</button>
+                    </div>
+                </div>
+                <div class="calendar-weekdays">
+                    <div class="calendar-weekday">日</div>
+                    <div class="calendar-weekday">一</div>
+                    <div class="calendar-weekday">二</div>
+                    <div class="calendar-weekday">三</div>
+                    <div class="calendar-weekday">四</div>
+                    <div class="calendar-weekday">五</div>
+                    <div class="calendar-weekday">六</div>
+                </div>
+                <div class="calendar-days" id="archive-calendar-days"></div>
+            </div>
+            
+            <div id="archive-date-records">
+                <div class="empty-state">
+                    <div class="empty-title">选择日期查看记录</div>
+                    <div class="empty-desc">点击日历上的日期查看当天学习记录</div>
+                </div>
+            </div>
+        `;
+        
+        await this.renderArchiveCalendar();
+    },
+    
+    /**
+     * 渲染档案日历
+     */
+    async renderArchiveCalendar() {
+        const year = this.archiveCalendarYear;
+        const month = this.archiveCalendarMonth;
+        
+        document.getElementById('archive-calendar-title').textContent = 
+            `${year}年${month}月`;
+        
+        // 获取该月有记录的日期
+        const recordDates = await this.getMonthRecordDates(year, month);
+        
+        // 计算日历数据
+        const firstDay = new Date(year, month - 1, 1).getDay();
+        const daysInMonth = new Date(year, month, 0).getDate();
+        
+        let html = '';
+        
+        // 上月空白
+        const prevMonth = new Date(year, month - 2, 1);
+        const prevMonthDays = new Date(year, month - 1, 0).getDate();
+        for (let i = firstDay - 1; i >= 0; i--) {
+            html += `<div class="calendar-day other-month">${prevMonthDays - i}</div>`;
+        }
+        
+        // 当月日期
+        const today = Utils.getToday();
+        for (let day = 1; day <= daysInMonth; day++) {
+            const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+            const hasRecord = recordDates.includes(dateStr);
+            const isToday = dateStr === today;
+            
+            let classes = 'calendar-day';
+            if (isToday) classes += ' today';
+            if (hasRecord) classes += ' has-record';
+            
+            html += `
+                <div class="${classes}" data-date="${dateStr}" onclick="App.selectArchiveDate('${dateStr}')">
+                    ${day}
+                </div>
+            `;
+        }
+        
+        // 下月空白
+        const totalCells = firstDay + daysInMonth;
+        const remaining = totalCells % 7 === 0 ? 0 : 7 - (totalCells % 7);
+        for (let i = 1; i <= remaining; i++) {
+            html += `<div class="calendar-day other-month">${i}</div>`;
+        }
+        
+        document.getElementById('archive-calendar-days').innerHTML = html;
+    },
+    
+    /**
+     * 获取月份有记录的日期列表
+     */
+    async getMonthRecordDates(year, month) {
+        const recordDates = [];
+        const daysInMonth = new Date(year, month, 0).getDate();
+        
+        for (let day = 1; day <= daysInMonth; day++) {
+            const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+            const records = await Storage.getRecordsByDate(dateStr);
+            if (records.length > 0) {
+                recordDates.push(dateStr);
+            }
+        }
+        
+        return recordDates;
+    },
+    
+    /**
+     * 上个月（档案日历）
+     */
+    async prevArchiveMonth() {
+        this.archiveCalendarMonth--;
+        if (this.archiveCalendarMonth < 1) {
+            this.archiveCalendarMonth = 12;
+            this.archiveCalendarYear--;
+        }
+        await this.renderArchiveCalendar();
+    },
+    
+    /**
+     * 下个月（档案日历）
+     */
+    async nextArchiveMonth() {
+        this.archiveCalendarMonth++;
+        if (this.archiveCalendarMonth > 12) {
+            this.archiveCalendarMonth = 1;
+            this.archiveCalendarYear++;
+        }
+        await this.renderArchiveCalendar();
+    },
+    
+    /**
+     * 选择档案日期
+     */
+    async selectArchiveDate(dateStr) {
+        // 高亮选中日期
+        document.querySelectorAll('.calendar-day').forEach(el => el.classList.remove('selected'));
+        const selected = document.querySelector(`.calendar-day[data-date="${dateStr}"]`);
+        if (selected) {
+            selected.classList.add('selected');
+        }
+        
+        // 显示该日期的记录
+        await this.showArchiveDateRecords(dateStr);
+    },
+    
+    /**
+     * 显示选中日期的学习记录
+     */
+    async showArchiveDateRecords(dateStr) {
+        const container = document.getElementById('archive-date-records');
+        
+        try {
+            const records = await Storage.getRecordsByDate(dateStr);
+            const answers = await Storage.getAnswersByDate(dateStr);
+            
+            const typeIcon = {
+                '图书': '📚',
+                '视频': '🎬',
+                '音频文稿': '🎧'
+            };
+            
+            if (records.length === 0) {
                 container.innerHTML = `
                     <div class="empty-state">
-                        <div class="empty-icon">
-                            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
-                            </svg>
-                        </div>
-                        <div class="empty-title">暂无学习记录</div>
-                        <div class="empty-desc">开始学习后将自动生成学习记录</div>
+                        <div class="empty-title">${dateStr}</div>
+                        <div class="empty-desc">这一天没有学习记录</div>
                     </div>
                 `;
                 return;
             }
             
-            container.innerHTML = mockDates.map(item => `
-                <div class="card mb-4">
-                    <div class="card-header">
-                        <div class="card-title">${item.date}</div>
-                        <span class="text-muted">${item.records.length}条记录</span>
-                    </div>
-                    ${item.records.map(rec => `
-                        <div class="list-item" style="cursor: default;">
-                            <div class="list-item-content">
-                                <div class="list-item-title">${rec.name}</div>
-                                <div class="list-item-desc">${rec.desc}</div>
+            container.innerHTML = `
+                <h3 class="mb-4">${dateStr}的学习记录</h3>
+                ${records.map(record => {
+                    const answer = answers.find(a => a.learning_id === record.id || a.contentName === record.content_name);
+                    return `
+                        <div class="card mb-3">
+                            <div class="flex items-center gap-3">
+                                <div style="font-size: 28px;">${typeIcon[record.type] || '📖'}</div>
+                                <div class="flex-1">
+                                    <div class="font-medium">${this.escapeHtml(record.content_name)}</div>
+                                    <div class="text-muted" style="font-size: 13px;">
+                                        ${this.escapeHtml(record.content_desc || '')} · ${record.duration || 0}分钟
+                                    </div>
+                                </div>
+                                <div>
+                                    ${answer ? `
+                                        <span class="badge badge-success">评分: ${answer.avgScore || '-'}</span>
+                                    ` : `
+                                        <span class="badge badge-muted">未答题</span>
+                                    `}
+                                </div>
                             </div>
-                            <div class="text-muted">${rec.duration}分钟</div>
                         </div>
-                    `).join('')}
+                    `;
+                }).join('')}
+            `;
+            
+        } catch (error) {
+            console.error('加载日期记录失败:', error);
+            container.innerHTML = `
+                <div class="empty-state">
+                    <div class="empty-title">加载失败</div>
+                    <div class="empty-desc">请稍后重试</div>
                 </div>
-            `).join('');
+            `;
         }
-    },
-    
-    /**
-     * 切换书籍详情
-     */
-    toggleBookDetail(bookId) {
-        Utils.showToast('展开详情（功能开发中）', 'default');
     },
     
     /**

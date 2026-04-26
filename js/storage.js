@@ -632,6 +632,99 @@ const Storage = {
         const allQuestions = this.getQuestions();
         const filtered = allQuestions.filter(q => q.contentName !== contentName);
         Utils.storage.set('learning_questions', filtered);
+    },
+
+    // ============ 学习内容查询（档案页用） ============
+
+    /**
+     * 获取某类型所有学习内容
+     */
+    async getLearningsByType(type) {
+        const index = await this.getBookIndex();
+        const typeMap = {
+            'book': '图书',
+            'video': '视频',
+            'audio': '音频文稿'
+        };
+        const chineseType = typeMap[type] || type;
+        return index.items.filter(l => l.type === chineseType);
+    },
+
+    /**
+     * 获取某个学习内容
+     */
+    async getLearningById(id) {
+        const index = await this.getBookIndex();
+        return index.items.find(l => l.id === id);
+    },
+
+    /**
+     * 获取某个学习内容（通过名称）
+     */
+    async getLearningByName(name) {
+        const index = await this.getBookIndex();
+        return index.items.find(l => l.name === name);
+    },
+
+    /**
+     * 获取某学习内容的所有记录
+     */
+    async getRecordsByLearningName(contentName) {
+        const records = [];
+        // 遍历获取所有日期的记录
+        const endDate = new Date();
+        const startDate = new Date();
+        startDate.setFullYear(startDate.getFullYear() - 1); // 搜索过去一年的记录
+        
+        for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
+            const dateStr = Utils.formatDate(d, 'YYYY-MM-DD');
+            const recordData = await this.getRecord(dateStr);
+            if (recordData.records && recordData.records.length > 0) {
+                const filtered = recordData.records.filter(r => r.content_name === contentName);
+                records.push(...filtered.map(r => ({...r, date: dateStr})));
+            }
+        }
+        return records;
+    },
+
+    /**
+     * 获取某学习内容的答题记录
+     */
+    async getAnswersByLearningName(contentName) {
+        const answers = Utils.storage.get('exam_results', []);
+        return answers.filter(a => a.contentName === contentName);
+    },
+
+    /**
+     * 获取某日期的学习记录
+     */
+    async getRecordsByDate(date) {
+        const recordData = await this.getRecord(date);
+        return recordData.records || [];
+    },
+
+    /**
+     * 获取某日期的答题记录
+     */
+    async getAnswersByDate(date) {
+        const answers = Utils.storage.get('exam_results', []);
+        return answers.filter(a => a.date === date);
+    },
+
+    /**
+     * 保存答题结果
+     */
+    saveExamResult(result) {
+        const results = Utils.storage.get('exam_results', []);
+        results.push(result);
+        Utils.storage.set('exam_results', results);
+    },
+
+    /**
+     * 获取所有答题结果
+     */
+    getExamResults() {
+        return Utils.storage.get('exam_results', []);
     }
 };
 // ============ 任务系统核心逻辑 ============

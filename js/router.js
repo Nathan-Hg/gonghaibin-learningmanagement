@@ -208,15 +208,7 @@ const Router = {
                     </svg>
                     任务
                 </a>
-                <a class="nav-item ${route === 'exam' ? 'active' : ''}" href="#exam">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-                        <polyline points="14 2 14 8 20 8"></polyline>
-                        <line x1="16" y1="13" x2="8" y2="13"></line>
-                        <line x1="16" y1="17" x2="8" y2="17"></line>
-                    </svg>
-                    答题
-                </a>
+
                 <a class="nav-item ${route === 'archive' ? 'active' : ''}" href="#archive">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
@@ -322,6 +314,25 @@ const Router = {
             <!-- 手动录入表单 -->
             <div id="manual-form">
                 <div class="card">
+                    <!-- 语音录入按钮 -->
+                    <div class="voice-input-section mb-4" style="display: flex; align-items: center; gap: 12px; padding: 12px; background: var(--bg-secondary); border-radius: var(--radius-md);">
+                        <button class="btn btn-outline" onclick="App.toggleVoiceInput()">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+                                <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+                                <line x1="12" y1="19" x2="12" y2="23"></line>
+                                <line x1="8" y1="23" x2="16" y2="23"></line>
+                            </svg>
+                            语音录入
+                        </button>
+                        <span id="voice-status" class="text-muted" style="font-size: 13px; display: none;">
+                            🎤 正在录音...
+                        </span>
+                        <span id="voice-tip" class="text-muted" style="font-size: 13px;">
+                            点击麦克风开始说话，自动识别学习内容
+                        </span>
+                    </div>
+                    
                     <div class="form-item">
                         <label class="form-label">学习类型</label>
                         <select class="form-input form-select" id="record-type">
@@ -352,7 +363,7 @@ const Router = {
                 </div>
             </div>
             
-            <!-- 语音录入 -->
+            <!-- 语音录入（备用界面） -->
             <div id="voice-form" style="display: none;">
                 <div class="card text-center">
                     <div class="mb-6">
@@ -471,8 +482,8 @@ const Router = {
             </div>
             
             <div class="tabs">
-                <button class="tab active" data-tab="by-content">按内容查看</button>
-                <button class="tab" data-tab="by-date">按日期查看</button>
+                <button class="tab active" data-tab="by-content" onclick="App.switchArchiveTab('by-content')">按内容查看</button>
+                <button class="tab" data-tab="by-date" onclick="App.switchArchiveTab('by-date')">按日期查看</button>
             </div>
             
             <div id="archive-content">
