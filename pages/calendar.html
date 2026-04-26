@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>日历 - 主子的学习管理平台</title>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+    <div class="app-container">
+        <header class="app-header">
+            <div class="header-left">
+                <button class="back-btn" onclick="Router.go('home')">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="15 18 9 12 15 6"></polyline>
+                    </svg>
+                </button>
+                <img src="../assets/coze-logo.svg" alt="扣子" style="width: 32px; height: 36px;">
+                <span class="header-title">学习日历</span>
+            </div>
+            <div class="header-right">
+                <div class="user-info">
+                    <div class="user-avatar">U</div>
+                </div>
+            </div>
+        </header>
+
+        <nav class="bottom-nav">
+            <a class="nav-item" href="#home">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
+                </svg>
+                <span>首页</span>
+            </a>
+            <a class="nav-item" href="#record">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="12" y1="5" x2="12" y2="19"></line>
+                    <line x1="5" y1="12" x2="19" y2="12"></line>
+                </svg>
+                <span>录入</span>
+            </a>
+            <a class="nav-item active" href="#calendar">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="3" y="4" width="18" height="18" rx="2"></rect>
+                </svg>
+                <span>日历</span>
+            </a>
+            <a class="nav-item" href="#task">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+                </svg>
+                <span>任务</span>
+            </a>
+            <a class="nav-item" href="#archive">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                </svg>
+                <span>档案</span>
+            </a>
+        </nav>
+
+        <main class="app-main">
+            <div class="page-header">
+                <div class="page-title">学习日历</div>
+                <div class="page-subtitle">查看历史学习记录</div>
+            </div>
+
+            <div class="calendar" id="full-calendar">
+                <div class="calendar-header">
+                    <div class="calendar-title" id="calendar-title">加载中...</div>
+                    <div class="calendar-nav">
+                        <button onclick="prevMonth()">‹</button>
+                        <button onclick="nextMonth()">›</button>
+                    </div>
+                </div>
+                <div class="calendar-weekdays">
+                    <div class="calendar-weekday">日</div>
+                    <div class="calendar-weekday">一</div>
+                    <div class="calendar-weekday">二</div>
+                    <div class="calendar-weekday">三</div>
+                    <div class="calendar-weekday">四</div>
+                    <div class="calendar-weekday">五</div>
+                    <div class="calendar-weekday">六</div>
+                </div>
+                <div class="calendar-days" id="calendar-days"></div>
+            </div>
+
+            <!-- 选中日期详情 -->
+            <div class="card mt-4" id="day-detail" style="display: none;">
+                <div class="card-header">
+                    <div class="card-title" id="detail-date">选择日期</div>
+                </div>
+                <div id="detail-records">
+                    <div class="text-muted text-center" style="padding: 20px;">暂无记录</div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script src="../js/utils.js"></script>
+    <script src="../js/storage.js"></script>
+    <script src="../js/router.js"></script>
+    <script src="../js/app.js"></script>
+    <script>
+        let currentMonth = new Date();
+        let selectedDate = null;
+
+        document.addEventListener('DOMContentLoaded', function() {
+            // 检查登录状态
+            if (!Storage.isLoggedIn()) {
+                window.location.href = '../index.html';
+                return;
+            }
+            
+            renderCalendar();
+        });
+
+        async function renderCalendar() {
+            const year = currentMonth.getFullYear();
+            const month = currentMonth.getMonth() + 1;
+
+            document.getElementById('calendar-title').textContent = `${year}年${month}月`;
+
+            // 获取月份记录
+            const records = await getMonthRecordCounts(year, month);
+
+            const firstDay = Utils.getMonthFirstDay(currentMonth);
+            const lastDay = Utils.getMonthLastDay(currentMonth);
+            const startDay = firstDay.getDay();
+            const daysInMonth = lastDay.getDate();
+
+            const container = document.getElementById('calendar-days');
+            let html = '';
+
+            // 上月空白
+            const prevMonth = new Date(year, month - 2, 1);
+            const prevMonthDays = Utils.getMonthDays(prevMonth);
+            for (let i = startDay - 1; i >= 0; i--) {
+                html += `<div class="calendar-day other-month">${prevMonthDays - i}</div>`;
+            }
+
+            // 当月日期
+            const today = Utils.getToday();
+            for (let day = 1; day <= daysInMonth; day++) {
+                const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+                const recordCount = records[dateStr] || 0;
+                const level = Utils.getIntensityLevel(recordCount);
+                const isToday = dateStr === today;
+                const isSelected = dateStr === selectedDate;
+
+                let classes = 'calendar-day';
+                if (isToday) classes += ' today';
+                if (isSelected) classes += ' selected';
+                if (level > 0) classes += ` level-${level}`;
+
+                html += `
+                    <div class="${classes}" data-date="${dateStr}" onclick="selectDate('${dateStr}')">
+                        ${day}
+                        ${recordCount > 0 ? `<span class="record-count">${recordCount}</span>` : ''}
+                    </div>
+                `;
+            }
+
+            // 下月空白
+            const totalCells = startDay + daysInMonth;
+            const remaining = totalCells % 7 === 0 ? 0 : 7 - (totalCells % 7);
+            for (let i = 1; i <= remaining; i++) {
+                html += `<div class="calendar-day other-month">${i}</div>`;
+            }
+
+            container.innerHTML = html;
+        }
+
+        async function getMonthRecordCounts(year, month) {
+            const key = `records_${year}_${month}`;
+            let records = Utils.storage.get(key, null);
+
+            if (!records) {
+                records = {};
+                const daysInMonth = Utils.getMonthDays(new Date(year, month - 1));
+                for (let day = 1; day <= daysInMonth; day++) {
+                    if (Math.random() > 0.3) {
+                        const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+                        records[dateStr] = Math.floor(Math.random() * 4);
+                    }
+                }
+                Utils.storage.set(key, records);
+            }
+
+            return records;
+        }
+
+        function prevMonth() {
+            currentMonth.setMonth(currentMonth.getMonth() - 1);
+            renderCalendar();
+        }
+
+        function nextMonth() {
+            currentMonth.setMonth(currentMonth.getMonth() + 1);
+            renderCalendar();
+        }
+
+        async function selectDate(dateStr) {
+            selectedDate = dateStr;
+
+            document.querySelectorAll('.calendar-day').forEach(el => {
+                el.classList.remove('selected');
+            });
+            const selected = document.querySelector(`.calendar-day[data-date="${dateStr}"]`);
+            if (selected) {
+                selected.classList.add('selected');
+            }
+
+            const detailEl = document.getElementById('day-detail');
+            detailEl.style.display = 'block';
+            document.getElementById('detail-date').textContent = dateStr;
+
+            const recordData = await Storage.getRecord(dateStr);
+            const records = recordData.records || [];
+
+            if (records.length === 0) {
+                document.getElementById('detail-records').innerHTML = 
+                    '<div class="text-muted text-center" style="padding: 20px;">暂无记录</div>';
+            } else {
+                document.getElementById('detail-records').innerHTML = records.map(rec => `
+                    <div class="list-item">
+                        <div class="list-item-icon">
+                            ${rec.type === '图书' ? '📚' : rec.type === '视频' ? '🎬' : '🎧'}
+                        </div>
+                        <div class="list-item-content">
+                            <div class="list-item-title">${rec.content_name}</div>
+                            <div class="list-item-desc">${rec.content_desc || '无描述'} · ${rec.duration}分钟</div>
+                        </div>
+                    </div>
+                `).join('');
+            }
+        }
+    </script>
+</body>
+</html>

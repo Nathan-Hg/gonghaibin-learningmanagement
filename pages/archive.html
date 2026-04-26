@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>学习档案 - 主子的学习管理平台</title>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+    <div class="app-container">
+        <header class="app-header">
+            <div class="header-left">
+                <button class="back-btn" onclick="Router.go('home')">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="15 18 9 12 15 6"></polyline>
+                    </svg>
+                </button>
+                <img src="../assets/coze-logo.svg" alt="扣子" style="width: 32px; height: 36px;">
+                <span class="header-title">学习档案</span>
+            </div>
+        </header>
+
+        <nav class="bottom-nav">
+            <a class="nav-item" href="#home">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
+                </svg>
+                <span>首页</span>
+            </a>
+            <a class="nav-item" href="#record">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="12" y1="5" x2="12" y2="19"></line>
+                    <line x1="5" y1="12" x2="19" y2="12"></line>
+                </svg>
+                <span>录入</span>
+            </a>
+            <a class="nav-item" href="#calendar">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="3" y="4" width="18" height="18" rx="2"></rect>
+                </svg>
+                <span>日历</span>
+            </a>
+            <a class="nav-item" href="#task">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+                </svg>
+                <span>任务</span>
+            </a>
+            <a class="nav-item active" href="#archive">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                </svg>
+                <span>档案</span>
+            </a>
+        </nav>
+
+        <main class="app-main">
+            <div class="page-header">
+                <div class="page-title">学习档案</div>
+                <div class="page-subtitle">回顾学习历程，见证成长</div>
+            </div>
+
+            <div class="tabs">
+                <button class="tab active" data-tab="by-content">按内容查看</button>
+                <button class="tab" data-tab="by-date">按日期查看</button>
+            </div>
+
+            <div id="archive-content">
+                <div class="loading"><div class="spinner"></div></div>
+            </div>
+        </main>
+    </div>
+
+    <script src="../js/utils.js"></script>
+    <script src="../js/storage.js"></script>
+    <script src="../js/router.js"></script>
+    <script src="../js/app.js"></script>
+    <script>
+        let currentTab = 'by-content';
+        let expandedBooks = {};
+
+        document.addEventListener('DOMContentLoaded', function() {
+            // 检查登录状态
+            if (!Storage.isLoggedIn()) {
+                window.location.href = '../index.html';
+                return;
+            }
+            
+            // Tab切换
+            document.querySelectorAll('.tab').forEach(tab => {
+                tab.addEventListener('click', function() {
+                    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+                    this.classList.add('active');
+                    currentTab = this.dataset.tab;
+                    loadArchive();
+                });
+            });
+
+            loadArchive();
+        });
+
+        async function loadArchive() {
+            const container = document.getElementById('archive-content');
+
+            if (currentTab === 'by-content') {
+                // 按内容查看
+                const mockBooks = [
+                    { id: 'book_1', name: '认知觉醒', type: '图书', recordCount: 12, masteryScore: 7.5, status: 'learning', records: [
+                        { date: Utils.getToday(), desc: '第三章：元认知', duration: 45 },
+                        { date: Utils.getRelativeDate(-1), desc: '第二章：潜意识', duration: 50 }
+                    ]},
+                    { id: 'book_2', name: 'Python编程', type: '视频', recordCount: 8, masteryScore: 9, status: 'learning', records: [
+                        { date: Utils.getRelativeDate(-2), desc: '基础语法', duration: 30 }
+                    ]},
+                    { id: 'book_3', name: '英语听力', type: '音频文稿', recordCount: 15, masteryScore: 8, status: 'completed', records: [
+                        { date: Utils.getRelativeDate(-5), desc: 'VOA慢速英语', duration: 20 }
+                    ]}
+                ];
+
+                container.innerHTML = mockBooks.map(book => `
+                    <div class="card mb-4">
+                        <div onclick="toggleBookDetail('${book.id}')" style="cursor: pointer;">
+                            <div class="flex items-center gap-4">
+                                <div class="list-item-icon" style="width: 56px; height: 56px; font-size: 24px;">
+                                    ${book.type === '图书' ? '📚' : book.type === '视频' ? '🎬' : '🎧'}
+                                </div>
+                                <div class="flex-1">
+                                    <div class="font-semibold">${book.name}</div>
+                                    <div class="flex items-center gap-2 mt-2">
+                                        <span class="tag tag-primary">${book.type}</span>
+                                        <span class="text-muted" style="font-size: 12px;">录入${book.recordCount}次</span>
+                                        <span class="tag ${book.status === 'completed' ? 'tag-success' : 'tag-warning'}">
+                                            ${book.status === 'completed' ? '已完成' : '学习中'}
+                                        </span>
+                                    </div>
+                                </div>
+                                <div class="text-right">
+                                    <div class="text-purple font-semibold">${book.masteryScore}</div>
+                                    <div class="text-muted" style="font-size: 12px;">掌握度</div>
+                                </div>
+                            </div>
+
+                            <div class="progress-bar mt-4">
+                                <div class="progress-fill" style="width: ${book.masteryScore * 10}%;"></div>
+                            </div>
+                        </div>
+
+                        <!-- 二级视图：日期列表 -->
+                        <div id="book-detail-${book.id}" style="display: ${expandedBooks[book.id] ? 'block' : 'none'}; margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border-light);">
+                            ${book.records.map(rec => `
+                                <div class="flex items-center justify-between mb-2" style="font-size: 13px;">
+                                    <span class="text-muted">${rec.date}</span>
+                                    <span>${rec.desc}</span>
+                                    <span class="text-muted">${rec.duration}分钟</span>
+                                </div>
+                            `).join('')}
+                        </div>
+
+                        ${book.status !== 'completed' ? `
+                            <button class="btn btn-sm btn-outline mt-4" onclick="event.stopPropagation(); markComplete('${book.id}')">
+                                标记完成
+                            </button>
+                        ` : ''}
+                    </div>
+                `).join('');
+            } else {
+                // 按日期查看
+                const mockDates = [
+                    { date: Utils.getToday(), records: [
+                        { name: '认知觉醒', type: '图书', desc: '第三章：元认知', duration: 45, score: 8 }
+                    ]},
+                    { date: Utils.getRelativeDate(-1), records: [
+                        { name: 'Python编程', type: '视频', desc: '基础语法', duration: 30, score: 9 },
+                        { name: '英语听力', type: '音频文稿', desc: 'VOA慢速', duration: 20, score: 7 }
+                    ]},
+                    { date: Utils.getRelativeDate(-2), records: [
+                        { name: '认知觉醒', type: '图书', desc: '第二章：潜意识', duration: 50, score: 8 }
+                    ]}
+                ];
+
+                container.innerHTML = mockDates.map(item => `
+                    <div class="card mb-4">
+                        <div class="card-header">
+                            <div class="card-title">${item.date}</div>
+                            <span class="text-muted">${item.records.length}条记录</span>
+                        </div>
+                        ${item.records.map(rec => `
+                            <div class="list-item" style="cursor: default;">
+                                <div class="list-item-icon" style="width: 40px; height: 40px; font-size: 18px;">
+                                    ${rec.type === '图书' ? '📚' : rec.type === '视频' ? '🎬' : '🎧'}
+                                </div>
+                                <div class="list-item-content">
+                                    <div class="list-item-title">${rec.name}</div>
+                                    <div class="list-item-desc">${rec.desc}</div>
+                                </div>
+                                <div class="text-right">
+                                    <div class="text-muted">${rec.duration}分钟</div>
+                                    <div class="text-purple" style="font-size: 12px;">★ ${rec.score}</div>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                `).join('');
+            }
+        }
+
+        function toggleBookDetail(bookId) {
+            expandedBooks[bookId] = !expandedBooks[bookId];
+            const detail = document.getElementById(`book-detail-${bookId}`);
+            if (detail) {
+                detail.style.display = expandedBooks[bookId] ? 'block' : 'none';
+            }
+        }
+
+        async function markComplete(bookId) {
+            const confirmed = await Utils.showConfirm('标记完成', '确认将此内容标记为已完成？\n完成后将不再生成该内容的复习任务。');
+            if (confirmed) {
+                Utils.showToast('已标记为完成 ✓', 'success');
+                loadArchive();
+            }
+        }
+    </script>
+</body>
+</html>

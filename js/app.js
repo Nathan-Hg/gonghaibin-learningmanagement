@@ -1,0 +1,943 @@
+/**
+ * 主应用逻辑模块
+ */
+const App = {
+    // 当前月份
+    currentMonth: new Date(),
+    
+    // 选中的日期
+    selectedDate: null,
+    
+    // 录音状态
+    isRecording: false,
+    mediaRecorder: null,
+    audioChunks: [],
+    
+    /**
+     * 初始化应用
+     */
+    init() {
+        // 初始化路由
+        Router.init();
+        
+        console.log('App initialized');
+    },
+    
+    /**
+     * 加载页面数据
+     */
+    async loadPageData(route) {
+        switch (route) {
+            case 'home':
+            case 'calendar':
+                await this.renderCalendar();
+                break;
+            case 'task':
+                await this.loadTasks();
+                break;
+            case 'exam':
+                await this.loadExam();
+                break;
+            case 'archive':
+                await this.loadArchive();
+                break;
+            case 'knowledge':
+                await this.loadKnowledge();
+                break;
+            case 'stats':
+                await this.loadStats();
+                break;
+        }
+    },
+    
+    // ============ 日历相关 ============
+    
+    /**
+     * 渲染日历
+     */
+    async renderCalendar() {
+        const year = this.currentMonth.getFullYear();
+        const month = this.currentMonth.getMonth() + 1;
+        
+        // 更新标题
+        const titleEl = document.getElementById('calendar-title');
+        if (titleEl) {
+            titleEl.textContent = `${year}年${month}月`;
+        }
+        
+        // 获取月份记录数据
+        const records = await this.getMonthRecordCounts(year, month);
+        
+        // 计算日历数据
+        const firstDay = Utils.getMonthFirstDay(this.currentMonth);
+        const lastDay = Utils.getMonthLastDay(this.currentMonth);
+        const startDay = firstDay.getDay();
+        const daysInMonth = lastDay.getDate();
+        
+        // 生成日历HTML
+        const container = document.getElementById('calendar-days');
+        if (!container) return;
+        
+        let html = '';
+        
+        // 上月空白
+        const prevMonth = new Date(year, month - 2, 1);
+        const prevMonthDays = Utils.getMonthDays(prevMonth);
+        for (let i = startDay - 1; i >= 0; i--) {
+            const day = prevMonthDays - i;
+            html += `<div class="calendar-day other-month">${day}</div>`;
+        }
+        
+        // 当月日期
+        const today = Utils.getToday();
+        for (let day = 1; day <= daysInMonth; day++) {
+            const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+            const recordCount = records[dateStr] || 0;
+            const level = Utils.getIntensityLevel(recordCount);
+            const isToday = dateStr === today;
+            
+            let classes = 'calendar-day';
+            if (isToday) classes += ' today';
+            if (level > 0) classes += ` level-${level}`;
+            
+            html += `
+                <div class="${classes}" data-date="${dateStr}" onclick="App.selectDate('${dateStr}')">
+                    ${day}
+                </div>
+            `;
+        }
+        
+        // 下月空白
+        const totalCells = startDay + daysInMonth;
+        const remaining = totalCells % 7 === 0 ? 0 : 7 - (totalCells % 7);
+        for (let i = 1; i <= remaining; i++) {
+            html += `<div class="calendar-day other-month">${i}</div>`;
+        }
+        
+        container.innerHTML = html;
+    },
+    
+    /**
+     * 获取月份记录数量
+     */
+    async getMonthRecordCounts(year, month) {
+        // 从存储获取
+        const key = `records_${year}_${month}`;
+        let records = Utils.storage.get(key, null);
+        
+        if (!records) {
+            records = {};
+        }
+        
+        return records;
+    },
+    
+    /**
+     * 上个月
+     */
+    prevMonth() {
+        this.currentMonth.setMonth(this.currentMonth.getMonth() - 1);
+        this.renderCalendar();
+    },
+    
+    /**
+     * 下个月
+     */
+    nextMonth() {
+        this.currentMonth.setMonth(this.currentMonth.getMonth() + 1);
+        this.renderCalendar();
+    },
+    
+    /**
+     * 选择日期
+     */
+    async selectDate(dateStr) {
+        this.selectedDate = dateStr;
+        
+        // 更新选中状态
+        document.querySelectorAll('.calendar-day').forEach(el => {
+            el.classList.remove('selected');
+        });
+        const selected = document.querySelector(`.calendar-day[data-date="${dateStr}"]`);
+        if (selected) {
+            selected.classList.add('selected');
+        }
+        
+        // 如果是日历页，显示详情
+        const detailEl = document.getElementById('day-detail');
+        if (detailEl) {
+            detailEl.style.display = 'block';
+            document.getElementById('detail-date').textContent = dateStr;
+            
+            const recordData = await Storage.getRecord(dateStr);
+            const records = recordData.records || [];
+            
+            if (records.length === 0) {
+                document.getElementById('detail-records').innerHTML = `
+                    <div class="empty-state" style="padding: 30px;">
+                        <div class="empty-desc">暂无学习记录</div>
+                    </div>
+                `;
+            } else {
+                document.getElementById('detail-records').innerHTML = records.map(rec => `
+                    <div class="list-item">
+                        <div class="list-item-icon">
+                            ${rec.type === '图书' ? '📚' : rec.type === '视频' ? '🎬' : '🎧'}
+                        </div>
+                        <div class="list-item-content">
+                            <div class="list-item-title">${rec.content_name}</div>
+                            <div class="list-item-desc">${rec.content_desc} · ${rec.duration}分钟</div>
+                        </div>
+                    </div>
+                `).join('');
+            }
+        }
+    },
+    
+    // ============ 录入相关 ============
+    
+    /**
+     * HTML转义函数，防止XSS攻击
+     */
+    escapeHtml(str) {
+        if (!str) return '';
+        const div = document.createElement('div');
+        div.textContent = str;
+        return div.innerHTML;
+    },
+    
+    /**
+     * 提交学习记录（显示预览）
+     */
+    async submitRecord() {
+        const type = document.getElementById('record-type').value;
+        const name = document.getElementById('content-name').value.trim();
+        const desc = document.getElementById('content-desc').value.trim();
+        const duration = parseInt(document.getElementById('duration').value) || 0;
+        
+        if (!name) {
+            Utils.showToast('请输入内容名称', 'error');
+            return;
+        }
+        if (!duration || duration <= 0) {
+            Utils.showToast('请输入有效的学习时长', 'error');
+            return;
+        }
+        
+        // 保存到待确认记录（对特殊字符进行HTML转义）
+        this.pendingRecord = {
+            type,
+            content_name: this.escapeHtml(name),
+            content_desc: this.escapeHtml(desc) || '',
+            duration
+        };
+        
+        // 显示预览确认弹窗
+        this.showRecordPreview(this.pendingRecord);
+    },
+    
+    // 待确认的记录
+    pendingRecord: null,
+    
+    /**
+     * 显示记录预览弹窗
+     */
+    showRecordPreview(record) {
+        // 移除已存在的弹窗
+        const existingOverlay = document.querySelector('.confirm-modal-overlay');
+        if (existingOverlay) existingOverlay.remove();
+        
+        const overlay = document.createElement('div');
+        overlay.className = 'confirm-modal-overlay';
+        
+        const icon = record.type === '图书' ? '📚' : record.type === '视频' ? '🎬' : '🎧';
+        
+        overlay.innerHTML = `
+            <div class="confirm-modal" style="max-width: 400px;">
+                <div class="confirm-title">📝 录入预览</div>
+                <div class="confirm-message" style="text-align: left; padding: 16px; background: var(--bg-secondary); border-radius: 8px; margin: 16px 0;">
+                    <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px;">
+                        <div style="font-size: 32px;">${icon}</div>
+                        <div style="font-weight: 600; font-size: 16px;">${this.escapeHtml(record.content_name)}</div>
+                    </div>
+                    <div style="margin-bottom: 8px; font-size: 14px; color: #64748B;">
+                        <strong>类型：</strong>${record.type}
+                    </div>
+                    <div style="margin-bottom: 8px; font-size: 14px; color: #64748B;">
+                        <strong>时长：</strong>${record.duration} 分钟
+                    </div>
+                    ${record.content_desc ? `
+                    <div style="font-size: 13px; color: #94A3B8; padding: 8px; background: white; border-radius: 6px; margin-top: 8px;">
+                        ${this.escapeHtml(record.content_desc)}
+                    </div>
+                    ` : ''}
+                </div>
+                <div class="confirm-buttons">
+                    <button class="btn confirm-btn-cancel" onclick="App.cancelRecordPreview()">返回修改</button>
+                    <button class="btn confirm-btn-confirm" onclick="App.confirmRecord()">确认保存</button>
+                </div>
+            </div>
+        `;
+        
+        document.body.appendChild(overlay);
+        setTimeout(() => overlay.classList.add('show'), 10);
+        
+        // 点击遮罩关闭
+        overlay.onclick = (e) => { if (e.target === overlay) App.cancelRecordPreview(); };
+    },
+    
+    /**
+     * 取消预览，返回修改
+     */
+    cancelRecordPreview() {
+        const overlay = document.querySelector('.confirm-modal-overlay');
+        if (overlay) overlay.remove();
+        this.pendingRecord = null;
+        Utils.showToast('请修改后重新提交', 'info');
+    },
+    
+    /**
+     * 确认保存记录
+     */
+    async confirmRecord() {
+        if (!this.pendingRecord) return;
+        
+        const today = Utils.getToday();
+        await Storage.saveRecord(today, this.pendingRecord);
+        
+        // 移除预览弹窗
+        const overlay = document.querySelector('.confirm-modal-overlay');
+        if (overlay) overlay.remove();
+        this.pendingRecord = null;
+        
+        // 清除表单
+        document.getElementById('content-name').value = '';
+        document.getElementById('content-desc').value = '';
+        document.getElementById('duration').value = '';
+        
+        Utils.showToast('✅ 记录已保存', 'success');
+        
+        // 刷新日历
+        this.renderCalendar();
+    },
+    
+    /**
+     * 切换录音状态
+     */
+    async toggleRecording() {
+        const btn = document.getElementById('record-btn');
+        const status = document.getElementById('record-status');
+        
+        if (!this.isRecording) {
+            // 开始录音
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                this.mediaRecorder = new MediaRecorder(stream);
+                this.audioChunks = [];
+                
+                this.mediaRecorder.ondataavailable = (e) => {
+                    this.audioChunks.push(e.data);
+                };
+                
+                this.mediaRecorder.onstop = async () => {
+                    stream.getTracks().forEach(track => track.stop());
+                    await this.processRecording();
+                };
+                
+                this.mediaRecorder.start();
+                this.isRecording = true;
+                btn.classList.add('recording');
+                status.textContent = '正在录音...';
+            } catch (err) {
+                console.error('录音失败:', err);
+                Utils.showToast('无法访问麦克风，请检查权限设置', 'error');
+            }
+        } else {
+            // 停止录音
+            this.mediaRecorder.stop();
+            this.isRecording = false;
+            btn.classList.remove('recording');
+            status.textContent = '处理中...';
+        }
+    },
+    
+    /**
+     * 处理录音（模拟）
+     */
+    async processRecording() {
+        const status = document.getElementById('record-status');
+        const result = document.getElementById('transcript-result');
+        const text = document.getElementById('transcript-text');
+        
+        // 模拟AI转写和解析
+        await new Promise(resolve => setTimeout(resolve, 1500));
+        
+        // 模拟转写结果
+        const mockTranscript = `今天学习了《认知觉醒》第三章元认知部分。主要内容包括：1. 元认知是对自己思考过程的认知和理解；2. 通过元认知可以及时修正错误思维；3. 每天冥想练习可以提升元认知能力。学习时长约45分钟。`;
+        
+        status.textContent = '转写完成';
+        text.textContent = mockTranscript;
+        result.style.display = 'block';
+        
+        // 模拟解析拆分
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        
+        // 自动填充表单
+        document.getElementById('record-type').value = '图书';
+        document.getElementById('content-name').value = '认知觉醒';
+        document.getElementById('content-desc').value = '第三章：元认知';
+        document.getElementById('duration').value = '45';
+        
+        Utils.showToast('已解析并填充表单，请确认提交', 'success');
+        
+        // 切换到手动录入tab
+        document.querySelector('.tab[data-tab="manual"]').click();
+    },
+    
+    // ============ 任务相关 ============
+    
+    // 任务列表数据
+    taskData: [],
+    
+    // 待筛选的任务数据
+    _taskData: [],
+    
+    /**
+     * 加载任务列表
+     */
+    async loadTasks() {
+        const container = document.getElementById('task-list');
+        if (!container) return;
+        
+        // 从存储获取真实任务数据，如果没有则使用示例数据
+        const storedTasks = Storage.getTasks();
+        const mockTasks = storedTasks && storedTasks.length > 0 ? storedTasks : [
+            { id: 'task_1', title: '复习《认知觉醒》第一章', source: '图书', dueDate: Utils.getToday(), status: 'pending' },
+            { id: 'task_2', title: '复习《Python编程》基础语法', source: '视频', dueDate: Utils.getRelativeDate(-1), status: 'pending' },
+            { id: 'task_3', title: '完成本周学习总结', source: '综合', dueDate: Utils.getRelativeDate(-3), status: 'completed' }
+        ];
+        
+        // 保存到实例数据
+        this._taskData = mockTasks;
+        this.taskData = mockTasks;
+        
+        // 只有当真正没有数据时才显示空状态
+        if (!mockTasks || mockTasks.length === 0) {
+            container.innerHTML = `
+                <div class="empty-state">
+                    <div class="empty-icon">
+                        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+                            <polyline points="22 4 12 14.01 9 11.01"></polyline>
+                        </svg>
+                    </div>
+                    <div class="empty-title">暂无任务</div>
+                    <div class="empty-desc">完成学习录入后会自动生成复习任务</div>
+                </div>
+            `;
+            return;
+        }
+        
+        container.innerHTML = mockTasks.map(task => `
+            <div class="task-item">
+                <div class="task-checkbox ${task.status === 'completed' ? 'checked' : ''}" 
+                     onclick="App.toggleTask('${task.id}')"></div>
+                <div class="task-content">
+                    <div class="task-title ${task.status === 'completed' ? 'text-muted' : ''}" 
+                         style="${task.status === 'completed' ? 'text-decoration: line-through;' : ''}">
+                        ${task.title}
+                    </div>
+                    <div class="task-meta">
+                        ${task.source} · ${task.status === 'completed' ? '已完成' : '待完成'}
+                    </div>
+                </div>
+                ${task.status !== 'completed' ? `
+                    <div class="task-actions">
+                        <button class="btn btn-sm btn-outline" onclick="App.postponeTask('${task.id}')">延期</button>
+                    </div>
+                ` : ''}
+            </div>
+        `).join('');
+    },
+    
+    /**
+     * 显示添加任务弹窗
+     */
+    showAddTaskModal() {
+        const overlay = document.createElement('div');
+        overlay.className = 'modal-overlay active';
+        overlay.id = 'add-task-modal';
+        
+        overlay.innerHTML = `
+            <div class="modal-content" style="width: 360px;">
+                <button class="modal-close" onclick="App.closeAddTaskModal()">&times;</button>
+                <div class="font-semibold mb-4" style="font-size: 18px;">添加新任务</div>
+                
+                <div class="form-item mb-4">
+                    <label class="form-label">任务标题</label>
+                    <input type="text" class="form-input" id="new-task-title" placeholder="请输入任务标题">
+                </div>
+                
+                <div class="form-item mb-4">
+                    <label class="form-label">学习来源</label>
+                    <select class="form-input form-select" id="new-task-source">
+                        <option value="图书">📚 图书</option>
+                        <option value="视频">🎬 视频</option>
+                        <option value="音频文稿">🎧 音频文稿</option>
+                        <option value="综合">📝 综合</option>
+                    </select>
+                </div>
+                
+                <div class="form-item mb-4">
+                    <label class="form-label">截止日期</label>
+                    <input type="date" class="form-input" id="new-task-date" value="${Utils.getToday()}">
+                </div>
+                
+                <button class="btn btn-primary" style="width: 100%;" onclick="App.addTask()">添加任务</button>
+            </div>
+        `;
+        
+        overlay.onclick = (e) => { if (e.target === overlay) App.closeAddTaskModal(); };
+        document.body.appendChild(overlay);
+    },
+    
+    /**
+     * 关闭添加任务弹窗
+     */
+    closeAddTaskModal() {
+        const modal = document.getElementById('add-task-modal');
+        if (modal) modal.remove();
+    },
+    
+    /**
+     * 添加新任务
+     */
+    async addTask() {
+        const title = document.getElementById('new-task-title').value.trim();
+        const source = document.getElementById('new-task-source').value;
+        const dueDate = document.getElementById('new-task-date').value;
+        
+        if (!title) {
+            Utils.showToast('请输入任务标题', 'error');
+            return;
+        }
+        
+        const newTask = {
+            title: title,
+            source: source,
+            dueDate: dueDate
+        };
+        
+        // 保存到存储
+        await Storage.addTask(newTask);
+        
+        Utils.showToast('任务添加成功', 'success');
+        this.closeAddTaskModal();
+        this.loadTasks();
+    },
+    
+    /**
+     * 切换任务状态
+     */
+    async toggleTask(taskId) {
+        const confirmed = await Utils.showConfirm('完成任务', '确认完成此任务？');
+        if (confirmed) {
+            Utils.showToast('任务已完成', 'success');
+            this.loadTasks();
+        }
+    },
+    
+    /**
+     * 延期任务
+     */
+    async postponeTask(taskId) {
+        const confirmed = await Utils.showConfirm('延期任务', '确认将此任务延期？');
+        if (confirmed) {
+            Utils.showToast('任务已延期', 'success');
+            this.loadTasks();
+        }
+    },
+    
+    // ============ 答题相关 ============
+    
+    /**
+     * 加载答题内容
+     */
+    async loadExam() {
+        const container = document.getElementById('exam-content');
+        if (!container) return;
+        
+        // 模拟考核数据
+        const exam = Storage.generateMockExam();
+        
+        container.innerHTML = `
+            <div class="card mb-4">
+                <div class="card-header">
+                    <div class="card-title">今日考核 · ${exam.book_name}</div>
+                    <span class="card-badge">${exam.questions.length}题</span>
+                </div>
+                <div class="text-muted" style="font-size: 13px;">
+                    请认真作答，完成后系统将进行评分
+                </div>
+            </div>
+            
+            ${exam.questions.map((q, index) => `
+                <div class="question-card">
+                    <div class="question-header">
+                        <span class="question-type ${q.type === '记忆' ? 'memory' : 'understanding'}">
+                            ${q.type === '记忆' ? '💭 记忆题' : '💡 理解题'}
+                        </span>
+                        <span class="question-source">来源：${q.source}</span>
+                    </div>
+                    <div class="question-text">${index + 1}. ${q.question}</div>
+                    
+                    <div class="question-answer">
+                        <label>你的回答：</label>
+                        <div class="mt-2">
+                            <button class="record-btn" style="width: 48px; height: 48px;" 
+                                    onclick="App.recordAnswer('${q.id}')">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                                    <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"></path>
+                                </svg>
+                            </button>
+                        </div>
+                        <div class="mt-2 text-muted" style="font-size: 12px;">
+                            点击录音作答，录音将转文字存储
+                        </div>
+                    </div>
+                    
+                    <div class="mt-4">
+                        <label>自我评分：</label>
+                        <div class="star-rating mt-2" data-question="${q.id}">
+                            ${[1,2,3,4,5].map(n => `
+                                <svg class="star" data-score="${n}" onclick="App.setScore(this, ${n})" 
+                                     viewBox="0 0 24 24" fill="currentColor">
+                                    <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
+                                </svg>
+                            `).join('')}
+                        </div>
+                    </div>
+                </div>
+            `).join('')}
+            
+            <button class="btn btn-primary btn-lg" style="width: 100%;" onclick="App.submitExam()">
+                提交考核
+            </button>
+        `;
+    },
+    
+    /**
+     * 录音作答
+     */
+    async recordAnswer(questionId) {
+        Utils.showToast('开始录音...', 'default');
+        // 模拟录音
+        setTimeout(() => {
+            Utils.showToast('回答已录制', 'success');
+        }, 2000);
+    },
+    
+    /**
+     * 设置评分
+     */
+    setScore(star, score) {
+        const container = star.closest('.star-rating');
+        container.querySelectorAll('.star').forEach((s, i) => {
+            s.classList.toggle('active', i < score);
+        });
+    },
+    
+    /**
+     * 提交考核
+     */
+    async submitExam() {
+        const confirmed = await Utils.showConfirm('提交考核', '确认提交考核？提交后将无法修改。');
+        if (confirmed) {
+            Utils.showToast('考核已提交，正在评分...', 'success');
+            setTimeout(() => {
+                Utils.showToast('考核完成！平均得分8.5星', 'success');
+                Router.go('home');
+            }, 2000);
+        }
+    },
+    
+    // ============ 学习档案相关 ============
+    
+    /**
+     * 加载学习档案
+     */
+    async loadArchive() {
+        const container = document.getElementById('archive-content');
+        if (!container) return;
+        
+        const activeTab = document.querySelector('.tab.active')?.dataset.tab || 'by-content';
+        
+        if (activeTab === 'by-content') {
+            // 按内容查看
+            const mockBooks = [
+                { id: 'book_1', name: '认知觉醒', type: '图书', recordCount: 12, masteryScore: 7.5, status: 'learning' },
+                { id: 'book_2', name: 'Python编程', type: '视频', recordCount: 8, masteryScore: 9, status: 'learning' },
+                { id: 'book_3', name: '英语听力', type: '音频文稿', recordCount: 15, masteryScore: 8, status: 'completed' }
+            ];
+            
+            // 只有当真正没有数据时才显示空状态
+            if (!mockBooks || mockBooks.length === 0) {
+                container.innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-icon">
+                            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                            </svg>
+                        </div>
+                        <div class="empty-title">暂无学习档案</div>
+                        <div class="empty-desc">开始学习后将自动生成学习档案</div>
+                    </div>
+                `;
+                return;
+            }
+            
+            container.innerHTML = mockBooks.map(book => `
+                <div class="card mb-4" onclick="App.toggleBookDetail('${book.id}')">
+                    <div class="flex items-center gap-4">
+                        <div class="list-item-icon" style="width: 56px; height: 56px; font-size: 24px;">
+                            ${book.type === '图书' ? '📚' : book.type === '视频' ? '🎬' : '🎧'}
+                        </div>
+                        <div class="flex-1">
+                            <div class="font-semibold">${book.name}</div>
+                            <div class="flex items-center gap-2 mt-2">
+                                <span class="tag tag-primary">${book.type}</span>
+                                <span class="text-muted" style="font-size: 12px;">录入${book.recordCount}次</span>
+                                <span class="tag ${book.status === 'completed' ? 'tag-success' : 'tag-warning'}">
+                                    ${book.status === 'completed' ? '已完成' : '学习中'}
+                                </span>
+                            </div>
+                        </div>
+                        <div class="text-right">
+                            <div class="text-purple font-semibold">${book.masteryScore}</div>
+                            <div class="text-muted" style="font-size: 12px;">掌握度</div>
+                        </div>
+                    </div>
+                    
+                    <div class="progress-bar mt-4">
+                        <div class="progress-fill" style="width: ${book.masteryScore * 10}%;"></div>
+                    </div>
+                </div>
+            `).join('');
+        } else {
+            // 按日期查看
+            const mockDates = [
+                { date: Utils.getToday(), records: [
+                    { name: '认知觉醒', desc: '第三章：元认知', duration: 45 }
+                ]},
+                { date: Utils.getRelativeDate(-1), records: [
+                    { name: 'Python编程', desc: '基础语法', duration: 30 },
+                    { name: '英语听力', desc: 'VOA慢速', duration: 20 }
+                ]},
+                { date: Utils.getRelativeDate(-2), records: [
+                    { name: '认知觉醒', desc: '第二章：潜意识', duration: 50 }
+                ]}
+            ];
+            
+            // 只有当真正没有数据时才显示空状态
+            if (!mockDates || mockDates.length === 0) {
+                container.innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-icon">
+                            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                            </svg>
+                        </div>
+                        <div class="empty-title">暂无学习记录</div>
+                        <div class="empty-desc">开始学习后将自动生成学习记录</div>
+                    </div>
+                `;
+                return;
+            }
+            
+            container.innerHTML = mockDates.map(item => `
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <div class="card-title">${item.date}</div>
+                        <span class="text-muted">${item.records.length}条记录</span>
+                    </div>
+                    ${item.records.map(rec => `
+                        <div class="list-item" style="cursor: default;">
+                            <div class="list-item-content">
+                                <div class="list-item-title">${rec.name}</div>
+                                <div class="list-item-desc">${rec.desc}</div>
+                            </div>
+                            <div class="text-muted">${rec.duration}分钟</div>
+                        </div>
+                    `).join('')}
+                </div>
+            `).join('');
+        }
+    },
+    
+    /**
+     * 切换书籍详情
+     */
+    toggleBookDetail(bookId) {
+        Utils.showToast('展开详情（功能开发中）', 'default');
+    },
+    
+    /**
+     * 标记完成
+     */
+    async markComplete(bookId) {
+        const confirmed = await Utils.showConfirm('标记完成', '确认将此内容标记为已完成？');
+        if (confirmed) {
+            Utils.showToast('已标记为完成', 'success');
+            this.loadArchive();
+        }
+    },
+    
+    // ============ 知识库相关 ============
+    
+    // 知识库原始数据
+    _knowledgeData: [],
+    
+    /**
+     * 加载知识库
+     */
+    async loadKnowledge() {
+        const container = document.getElementById('knowledge-list');
+        if (!container) return;
+        
+        // 模拟知识库数据
+        const mockKnowledge = [
+            { name: '认知觉醒', content: '## 第一章：大脑的原理\n- 本能脑：约3.6亿年前演化\n- 情绪脑：约2亿年前演化\n- 理智脑：约250万年前演化\n\n## 第二章：潜意识\n- 模糊的类型：认知模糊、情绪模糊、行动模糊\n- 消除模糊：学习知识、保持清醒、详细审视' },
+            { name: 'Python基础', content: '## 数据类型\n- 整数、浮点数、字符串\n- 列表、元组、字典\n\n## 控制流\n- if条件判断\n- for/while循环' }
+        ];
+        
+        // 保存原始数据用于搜索
+        this._knowledgeData = mockKnowledge;
+        
+        // 只有当真正没有数据时才显示空状态
+        if (!mockKnowledge || mockKnowledge.length === 0) {
+            container.innerHTML = `
+                <div class="empty-state">
+                    <div class="empty-icon">
+                        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
+                            <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path>
+                        </svg>
+                    </div>
+                    <div class="empty-title">知识库为空</div>
+                    <div class="empty-desc">点击"新建"开始构建你的知识体系</div>
+                </div>
+            `;
+            return;
+        }
+        
+        this.renderKnowledgeList(mockKnowledge);
+    },
+    
+    /**
+     * 渲染知识库列表
+     */
+    renderKnowledgeList(items) {
+        const container = document.getElementById('knowledge-list');
+        if (!container) return;
+        
+        if (!items || items.length === 0) {
+            container.innerHTML = `
+                <div class="empty-state">
+                    <div class="empty-icon">
+                        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
+                            <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path>
+                        </svg>
+                    </div>
+                    <div class="empty-title">未找到匹配结果</div>
+                    <div class="empty-desc">尝试其他关键词搜索</div>
+                </div>
+            `;
+            return;
+        }
+        
+        container.innerHTML = items.map(item => `
+            <div class="card mb-4">
+                <div class="knowledge-item-title font-semibold" onclick="App.toggleKnowledge(this)">
+                    📖 ${item.name}
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="6 9 12 15 18 9"></polyline>
+                    </svg>
+                </div>
+                <div class="knowledge-item-content" style="display: none;">
+                    <pre style="white-space: pre-wrap; font-family: inherit; font-size: 13px;">${item.content}</pre>
+                </div>
+            </div>
+        `).join('');
+    },
+    
+    /**
+     * 搜索知识库
+     */
+    searchKnowledge(keyword) {
+        const trimmed = keyword.trim().toLowerCase();
+        
+        if (!trimmed) {
+            // 无关键词，显示全部
+            this.renderKnowledgeList(this._knowledgeData);
+            return;
+        }
+        
+        // 过滤匹配项
+        const filtered = this._knowledgeData.filter(item => 
+            item.name.toLowerCase().includes(trimmed) || 
+            item.content.toLowerCase().includes(trimmed)
+        );
+        
+        this.renderKnowledgeList(filtered);
+    },
+    
+    /**
+     * 切换知识库展开
+     */
+    toggleKnowledge(header) {
+        const content = header.nextElementSibling;
+        const icon = header.querySelector('svg');
+        const isHidden = content.style.display === 'none';
+        
+        content.style.display = isHidden ? 'block' : 'none';
+        icon.style.transform = isHidden ? 'rotate(180deg)' : 'rotate(0deg)';
+    },
+    
+    /**
+     * 新建知识库
+     */
+    addKnowledge() {
+        Utils.showToast('新建功能开发中', 'default');
+    },
+    
+    // ============ 统计相关 ============
+    
+    /**
+     * 加载统计数据
+     */
+    async loadStats() {
+        // 模拟统计数据
+        const stats = {
+            totalHours: 128,
+            totalContents: 35,
+            completedRate: 78,
+            avgMastery: 7.5
+        };
+        
+        const hoursEl = document.getElementById('stat-hours');
+        const contentsEl = document.getElementById('stat-contents');
+        const rateEl = document.getElementById('stat-rate');
+        const masteryEl = document.getElementById('stat-mastery');
+        
+        if (hoursEl) hoursEl.textContent = stats.totalHours;
+        if (contentsEl) contentsEl.textContent = stats.totalContents;
+        if (rateEl) rateEl.textContent = stats.completedRate + '%';
+        if (masteryEl) masteryEl.textContent = stats.avgMastery;
+    }
+};
+
+// 初始化应用
+document.addEventListener('DOMContentLoaded', () => {
+    App.init();
+});
