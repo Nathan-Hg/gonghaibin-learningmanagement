@@ -319,6 +319,8 @@ const App = {
         // 移除预览弹窗
         const overlay = document.querySelector('.confirm-modal-overlay');
         if (overlay) overlay.remove();
+        
+        const record = this.pendingRecord;
         this.pendingRecord = null;
         
         // 清除表单
@@ -326,7 +328,21 @@ const App = {
         document.getElementById('content-desc').value = '';
         document.getElementById('duration').value = '';
         
-        Utils.showToast('✅ 记录已保存', 'success');
+        Utils.showToast('✅ 记录已保存，正在生成题目...', 'success');
+        
+        // 新增：生成题目
+        try {
+            const questions = await Storage.generateQuestions(record);
+            if (questions && questions.length > 0) {
+                Storage.saveQuestions(record.content_name, questions);
+                Utils.showToast(`✅ 已生成${questions.length}道题目`, 'success');
+            } else {
+                Utils.showToast('题目生成失败，可稍后在考核页面重试', 'warning');
+            }
+        } catch (error) {
+            console.error('生成题目失败:', error);
+            Utils.showToast('题目生成失败，可稍后在考核页面重试', 'warning');
+        }
         
         // 刷新日历
         this.renderCalendar();

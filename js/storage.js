@@ -435,6 +435,32 @@ const Storage = {
      * 生成模拟考核题目
      */
     generateMockExam() {
+        // 从localStorage读取真实题目
+        const realQuestions = this.getQuestions();
+        
+        if (realQuestions && realQuestions.length > 0) {
+            // 有真实题目，随机选择一个学习内容
+            const contents = [...new Set(realQuestions.map(q => q.contentName))];
+            const randomContent = contents[Math.floor(Math.random() * contents.length)];
+            const filteredQuestions = realQuestions.filter(q => q.contentName === randomContent);
+            
+            return {
+                id: Utils.generateId('exam_'),
+                book_id: 'book_real',
+                book_name: randomContent,
+                questions: filteredQuestions.map((q, idx) => ({
+                    id: `q_${idx + 1}_${Date.now()}`,
+                    type: q.type === 'choice' ? '理解' : '应用',
+                    question: q.question,
+                    options: q.options,
+                    answer: q.answer,
+                    source: randomContent
+                })),
+                created_at: new Date().toISOString()
+            };
+        }
+        
+        // 没有真实题目，返回模拟题目
         return {
             id: Utils.generateId('exam_'),
             book_id: 'book_001',
@@ -467,6 +493,145 @@ const Storage = {
             ],
             created_at: new Date().toISOString()
         };
+    },
+
+    // ============ 题目生成系统 ============
+
+    /**
+     * 生成学习题目（调用DeepSeek）
+     * @param {Object} content - 学习内容 {type, content_name, content_desc}
+     * @returns {Array} 题目数组
+     */
+    async generateQuestions(content) {
+        const DEEPSEEK_API_KEY = localStorage.getItem('deepseek_api_key') || 'sk-dda01297df2c4048b80578fe86e7946b';
+        
+        const prompt = `你是一位专业的教育测评专家。请根据以下学习内容生成题目。
+
+学习类型：${content.type}
+学习内容：${content.content_name}
+内容概要：${content.content_desc || '暂无'}
+
+用户背景：
+- 教育行业16年从业经验
+- 互联网产品经理6年
+- 关注AI时代的教育变革
+
+请生成以下题目：
+
+【选择题2道】考察对核心概念的理解（不要考纯定义，考理解）
+格式：
+{"type":"choice","question":"题目","options":["A.xxx","B.xxx","C.xxx","D.xxx"],"answer":"B"}
+
+【主观题2道】学以致用，结合当下热点（AI趋势、教育变革）、社会问题、个人成长、行业发展
+格式：
+{"type":"subjective","question":"题目"}
+
+请用JSON数组返回：[题目1, 题目2, ...]
+只返回JSON，不要其他内容。`;
+
+        try {
+            Utils.showToast('正在生成题目，请稍候...', 'default');
+            
+            const response = await fetch('https://api.deepseek.com/chat/completions', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${DEEPSEEK_API_KEY}`
+                },
+                body: JSON.stringify({
+                    model: 'deepseek-chat',
+                    messages: [
+                        { role: 'system', content: '你是一位专业的教育测评专家，擅长生成高质量的学习题目。' },
+                        { role: 'user', content: prompt }
+                    ],
+                    temperature: 0.7,
+                    max_tokens: 2000
+                })
+            });
+            
+            if (!response.ok) {
+                throw new Error(`API调用失败: ${response.status}`);
+            }
+            
+            const data = await response.json();
+            const content_text = data.choices[0].message.content;
+            
+            // 解析JSON
+            let questions = [];
+            try {
+                const jsonMatch = content_text.match(/\[[\s\S]*\]/);
+                if (jsonMatch) {
+                    questions = JSON.parse(jsonMatch[0]);
+                } else {
+                    throw new Error('无法解析题目');
+                }
+            } catch (e) {
+                console.error('解析题目失败:', e);
+                Utils.showToast('题目生成解析失败', 'error');
+                return [];
+            }
+            
+            // 为每道题添加关联的学习内容信息
+            questions = questions.map((q, idx) => ({
+                ...q,
+                id: Utils.generateId('q_'),
+                contentName: content.content_name,
+                createdAt: new Date().toISOString()
+            }));
+            
+            return questions;
+            
+        } catch (error) {
+            console.error('生成题目失败:', error);
+            Utils.showToast('生成题目失败：' + error.message, 'error');
+            return [];
+        }
+    },
+
+    /**
+     * 获取所有题目
+     */
+    getQuestions() {
+        return Utils.storage.get('learning_questions', []);
+    },
+
+    /**
+     * 保存题目
+     * @param {string} contentName - 学习内容名称
+     * @param {Array} questions - 题目数组
+     */
+    saveQuestions(contentName, questions) {
+        const allQuestions = this.getQuestions();
+        
+        // 标记关联的学习内容
+        const newQuestions = questions.map(q => ({
+            ...q,
+            id: Utils.generateId('q_'),
+            contentName: contentName,
+            createdAt: new Date().toISOString()
+        }));
+        
+        allQuestions.push(...newQuestions);
+        Utils.storage.set('learning_questions', allQuestions);
+        
+        return newQuestions;
+    },
+
+    /**
+     * 根据学习内容获取题目
+     */
+    getQuestionsByContent(contentName) {
+        const allQuestions = this.getQuestions();
+        return allQuestions.filter(q => q.contentName === contentName);
+    },
+
+    /**
+     * 删除某学习内容的题目
+     */
+    deleteQuestionsByContent(contentName) {
+        const allQuestions = this.getQuestions();
+        const filtered = allQuestions.filter(q => q.contentName !== contentName);
+        Utils.storage.set('learning_questions', filtered);
     }
 };
 // ============ 任务系统核心逻辑 ============
