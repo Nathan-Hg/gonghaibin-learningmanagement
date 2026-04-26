@@ -111,6 +111,9 @@ const Router = {
      * 构建完整页面HTML
      */
     async buildPage(route) {
+        // 先获取badge HTML（异步）
+        const taskBadgeHtml = await this.getTaskBadgeHTML();
+        
         // 公共布局
         const layout = `
             <header class="app-header">
@@ -158,7 +161,7 @@ const Router = {
                     <span>日历</span>
                 </a>
                 <a class="nav-item ${route === 'task' ? 'active' : ''}" href="#task" style="position: relative;">
-                    ${this.getTaskBadgeHTML()}
+                    ${taskBadgeHtml}
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
                         <polyline points="22 4 12 14.01 9 11.01"></polyline>
@@ -198,7 +201,7 @@ const Router = {
                     日历
                 </a>
                 <a class="nav-item ${route === 'task' ? 'active' : ''}" href="#task" style="position: relative;">
-                    ${this.getTaskBadgeHTML()}
+                    ${taskBadgeHtml}
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
                         <polyline points="22 4 12 14.01 9 11.01"></polyline>
@@ -646,8 +649,8 @@ const Router = {
     /**
      * 获取过去30天内未完成的任务数
      */
-    getUncompletedTasksLast30Days() {
-        const tasks = Storage.getTasks();
+    async getUncompletedTasksLast30Days() {
+        const tasks = await Storage.getTasks();
         const thirtyDaysAgo = new Date();
         thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
         
@@ -664,8 +667,8 @@ const Router = {
     /**
      * 获取任务Tab气泡HTML
      */
-    getTaskBadgeHTML() {
-        const count = this.getUncompletedTasksLast30Days();
+    async getTaskBadgeHTML() {
+        const count = await this.getUncompletedTasksLast30Days();
         if (count > 0) {
             return `<span class="nav-badge">${count > 99 ? '99+' : count}</span>`;
         }
