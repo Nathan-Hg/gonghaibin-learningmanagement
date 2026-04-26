@@ -224,3 +224,77 @@ const Utils = {
         return Utils.formatDate(date, 'YYYY-MM-DD');
     }
 };
+
+    // ============ 任务系统辅助函数 ============
+
+    /**
+     * 格式化日期为中文
+     */
+    formatDateChinese: function(dateStr) {
+        if (!dateStr) return '';
+        const date = dateStr instanceof Date ? dateStr : new Date(dateStr);
+        const month = date.getMonth() + 1;
+        const day = date.getDate();
+        const weekdays = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+        const weekday = weekdays[date.getDay()];
+        return `${month}月${day}日${weekday}`;
+    },
+
+    /**
+     * 获取本周开始日期（周一）
+     */
+    getWeekStartDate: function(date = new Date()) {
+        const d = date instanceof Date ? new Date(date) : new Date(date);
+        const day = d.getDay();
+        const diff = day === 0 ? -6 : 1 - day; // 周一作为开始
+        d.setDate(d.getDate() + diff);
+        return this.formatDate(d, 'YYYY-MM-DD');
+    },
+
+    /**
+     * 获取本周结束日期（周日）
+     */
+    getWeekEndDate: function(weekStartDate) {
+        const d = new Date(weekStartDate);
+        d.setDate(d.getDate() + 6);
+        return this.formatDate(d, 'YYYY-MM-DD');
+    },
+
+    /**
+     * 格式化过期时间显示
+     */
+    formatExpireTime: function(expireAt) {
+        if (!expireAt) return '';
+        const expireDate = new Date(expireAt);
+        const now = new Date();
+        const diffMs = expireDate - now;
+        const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+        
+        if (diffDays > 0) {
+            return `${diffDays}天后过期`;
+        } else if (diffDays === 0) {
+            return '今日过期';
+        } else {
+            const absDays = Math.abs(diffDays);
+            return `已过期${absDays}天`;
+        }
+    },
+
+    /**
+     * 判断任务是否已过期
+     */
+    isTaskExpired: function(expireAt) {
+        if (!expireAt) return false;
+        return new Date(expireAt) < new Date();
+    },
+
+    /**
+     * 格式化任务类型显示
+     */
+    formatTaskType: function(type) {
+        const typeMap = {
+            'daily': '天任务',
+            'weekly': '周任务'
+        };
+        return typeMap[type] || type;
+    }

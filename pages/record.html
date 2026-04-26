@@ -304,6 +304,14 @@
 
             Utils.showToast('✅ 已保存', 'success');
             loadTodayRecords();
+            
+            // 触发任务生成
+            try {
+                await TaskSystem.triggerTaskGeneration();
+                console.log('任务已自动生成');
+            } catch (e) {
+                console.warn('任务生成失败:', e);
+            }
         }
 
         async function loadTodayRecords() {

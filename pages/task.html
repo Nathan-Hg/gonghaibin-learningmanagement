@@ -69,11 +69,11 @@
             <!-- 任务统计 -->
             <div class="stats-grid mb-6">
                 <div class="stat-card">
-                    <div class="stat-value" id="pending-count">2</div>
+                    <div class="stat-value" id="pending-count">0</div>
                     <div class="stat-label">待完成</div>
                 </div>
                 <div class="stat-card">
-                    <div class="stat-value" id="completed-count">1</div>
+                    <div class="stat-value" id="completed-count">0</div>
                     <div class="stat-label">已完成</div>
                 </div>
             </div>
@@ -81,6 +81,15 @@
             <!-- 任务列表 -->
             <div id="task-list">
                 <div class="loading"><div class="spinner"></div></div>
+            </div>
+
+            <!-- 已过期统计区 -->
+            <div id="expired-section" class="mt-6" style="display: none;">
+                <div class="section-header" onclick="toggleExpiredSection()">
+                    <span class="section-title">已过期统计区</span>
+                    <span class="section-toggle" id="expired-toggle">▼</span>
+                </div>
+                <div id="expired-list" class="expired-section"></div>
             </div>
         </main>
     </div>
@@ -100,85 +109,357 @@
             loadTasks();
         });
 
+        /**
+         * 加载任务列表
+         */
         async function loadTasks() {
             const container = document.getElementById('task-list');
+            const expiredSection = document.getElementById('expired-section');
+            const expiredList = document.getElementById('expired-list');
 
-            // 模拟任务数据
-            const mockTasks = [
-                { id: 'task_1', title: '复习《认知觉醒》第一章', source: '图书', dueDate: Utils.getToday(), status: 'pending', desc: '大脑的原理与本能脑、情绪脑、理智脑' },
-                { id: 'task_2', title: '复习《Python编程》基础语法', source: '视频', dueDate: Utils.getRelativeDate(-1), status: 'pending', desc: '数据类型、变量、运算符' },
-                { id: 'task_3', title: '完成本周学习总结', source: '综合', dueDate: Utils.getRelativeDate(-3), status: 'completed', desc: '整理本周学习内容' }
-            ];
+            try {
+                // 获取待完成任务
+                const pendingTasks = await TaskSystem.getPendingTasks();
+                
+                // 获取已过期任务
+                const expiredTasks = await TaskSystem.getExpiredTasks();
+                
+                // 获取已完成任务
+                const allTasks = await TaskSystem.getAllTasks();
+                const completedTasks = [
+                    ...allTasks.daily.filter(t => t.status === TaskStatus.COMPLETED),
+                    ...allTasks.weekly.filter(t => t.status === TaskStatus.COMPLETED)
+                ].sort((a, b) => new Date(b.completedAt) - new Date(a.completedAt));
 
-            if (mockTasks.length === 0) {
+                // 更新统计
+                document.getElementById('pending-count').textContent = pendingTasks.length;
+                document.getElementById('completed-count').textContent = completedTasks.length;
+
+                // 渲染待完成任务
+                if (pendingTasks.length === 0 && completedTasks.length === 0 && expiredTasks.length === 0) {
+                    container.innerHTML = `
+                        <div class="empty-state">
+                            <div class="empty-icon">
+                                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+                                    <polyline points="22 4 12 14.01 9 11.01"></polyline>
+                                </svg>
+                            </div>
+                            <div class="empty-title">暂无任务</div>
+                            <div class="empty-desc">完成学习录入后会自动生成复习任务</div>
+                        </div>
+                    `;
+                    expiredSection.style.display = 'none';
+                    return;
+                }
+
+                // 渲染待完成任务
+                let html = '';
+                
+                if (pendingTasks.length > 0) {
+                    html += `
+                        <div class="card mb-4">
+                            <div class="font-medium mb-4">待完成任务</div>
+                            ${pendingTasks.map(task => renderTaskItem(task, 'pending')).join('')}
+                        </div>
+                    `;
+                }
+
+                // 渲染已完成任务
+                if (completedTasks.length > 0) {
+                    html += `
+                        <div class="card mb-4">
+                            <div class="font-medium mb-4">已完成</div>
+                            ${completedTasks.slice(0, 5).map(task => renderTaskItem(task, 'completed')).join('')}
+                            ${completedTasks.length > 5 ? `<div class="text-center text-muted" style="padding: 10px;">更多 ${completedTasks.length - 5} 个已完成任务</div>` : ''}
+                        </div>
+                    `;
+                }
+
+                container.innerHTML = html;
+
+                // 渲染已过期任务（灰色显示）
+                if (expiredTasks.length > 0) {
+                    expiredSection.style.display = 'block';
+                    expiredList.innerHTML = `
+                        <div class="card">
+                            ${expiredTasks.map(task => renderTaskItem(task, 'expired')).join('')}
+                        </div>
+                    `;
+                } else {
+                    expiredSection.style.display = 'none';
+                }
+
+            } catch (error) {
+                console.error('加载任务失败:', error);
                 container.innerHTML = `
                     <div class="empty-state">
-                        <div class="empty-icon">
-                            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
-                                <polyline points="22 4 12 14.01 9 11.01"></polyline>
-                            </svg>
-                        </div>
-                        <div class="empty-title">暂无任务</div>
-                        <div class="empty-desc">完成学习录入后会自动生成复习任务</div>
+                        <div class="empty-title">加载失败</div>
+                        <div class="empty-desc">请稍后重试</div>
                     </div>
                 `;
-                return;
+            }
+        }
+
+        /**
+         * 渲染单个任务项
+         */
+        function renderTaskItem(task, displayStatus) {
+            const isExpired = displayStatus === 'expired';
+            const isCompleted = displayStatus === 'completed';
+            const taskType = Utils.formatTaskType(task.type);
+            const expireText = Utils.formatExpireTime(task.expireAt);
+            
+            // 获取任务描述
+            let taskDesc = '';
+            if (task.type === TaskTypes.DAILY) {
+                const contentNames = task.contents.map(c => c.contentName).join('、');
+                taskDesc = `${task.contents.length}个学习内容 · 约${task.estimatedMinutes}分钟`;
+            } else if (task.type === TaskTypes.WEEKLY) {
+                taskDesc = `共${task.totalContents}个内容 · ${task.totalRecords}条记录`;
             }
 
-            // 更新统计
-            const pending = mockTasks.filter(t => t.status === 'pending').length;
-            const completed = mockTasks.filter(t => t.status === 'completed').length;
-            document.getElementById('pending-count').textContent = pending;
-            document.getElementById('completed-count').textContent = completed;
+            // 状态样式
+            const statusClass = isExpired ? 'task-expired' : (isCompleted ? 'task-completed' : '');
+            const checkboxClass = isCompleted ? 'checked' : (isExpired ? 'expired' : '');
+            const titleClass = isExpired ? 'text-expired' : (isCompleted ? 'text-muted' : '');
+            const strikethrough = isCompleted ? 'style="text-decoration: line-through;"' : '';
 
-            container.innerHTML = `
-                <div class="card mb-4">
-                    <div class="font-medium mb-4">待完成任务</div>
-                    ${mockTasks.filter(t => t.status === 'pending').map(task => `
-                        <div class="task-item">
-                            <div class="task-checkbox" onclick="toggleTask('${task.id}')"></div>
-                            <div class="task-content">
-                                <div class="task-title">${task.title}</div>
-                                <div class="task-meta">${task.source} · ${task.desc}</div>
-                            </div>
-                            <div class="task-actions">
-                                <button class="btn btn-sm btn-outline" onclick="postponeTask('${task.id}')">延期</button>
-                            </div>
+            return `
+                <div class="task-item ${statusClass}" data-task-id="${task.id}" data-task-type="${task.type}">
+                    <div class="task-checkbox ${checkboxClass}" onclick="handleTaskClick('${task.id}', '${task.type}', '${displayStatus}')"></div>
+                    <div class="task-content" style="flex: 1;">
+                        <div class="task-title ${titleClass}" ${strikethrough}>
+                            ${task.name}
+                            <span class="task-type-badge">${taskType}</span>
                         </div>
-                    `).join('')}
-                </div>
-
-                <div class="card">
-                    <div class="font-medium mb-4">已完成</div>
-                    ${mockTasks.filter(t => t.status === 'completed').map(task => `
-                        <div class="task-item">
-                            <div class="task-checkbox checked" onclick="toggleTask('${task.id}')"></div>
-                            <div class="task-content">
-                                <div class="task-title text-muted" style="text-decoration: line-through;">${task.title}</div>
-                                <div class="task-meta">${task.source}</div>
-                            </div>
+                        <div class="task-meta ${isExpired ? 'text-expired' : ''}">${taskDesc}</div>
+                        <div class="task-expire ${isExpired ? 'text-expired' : 'text-muted'}">${expireText}</div>
+                    </div>
+                    ${!isExpired && !isCompleted ? `
+                        <div class="task-actions">
+                            <button class="btn btn-sm btn-outline" onclick="handlePostpone('${task.id}', '${task.type}')">延期</button>
                         </div>
-                    `).join('')}
+                    ` : ''}
                 </div>
             `;
         }
 
-        async function toggleTask(taskId) {
+        /**
+         * 处理任务点击（完成/查看详情）
+         */
+        async function handleTaskClick(taskId, taskType, displayStatus) {
+            if (displayStatus === 'completed' || displayStatus === 'expired') {
+                // 已完成或已过期，点击查看详情
+                await showTaskDetail(taskId, taskType);
+                return;
+            }
+
+            // 待完成任务，点击确认完成
             const confirmed = await Utils.showConfirm('完成任务', '确认完成此任务？');
             if (confirmed) {
+                await TaskSystem.completeTask(taskType, taskId);
                 Utils.showToast('任务已完成 ✓', 'success');
                 loadTasks();
             }
         }
 
-        async function postponeTask(taskId) {
-            const confirmed = await Utils.showConfirm('延期任务', '确认将此任务延期一天？');
+        /**
+         * 处理任务延期
+         */
+        async function handlePostpone(taskId, taskType) {
+            event.stopPropagation();
+            const confirmed = await Utils.showConfirm('延期任务', '确认将此任务延期1天？');
             if (confirmed) {
+                await TaskSystem.postponeTask(taskType, taskId);
                 Utils.showToast('任务已延期', 'success');
                 loadTasks();
             }
         }
+
+        /**
+         * 显示任务详情弹窗
+         */
+        async function showTaskDetail(taskId, taskType) {
+            const allTasks = await TaskSystem.getAllTasks();
+            const tasks = taskType === 'daily' ? allTasks.daily : allTasks.weekly;
+            const task = tasks.find(t => t.id === taskId);
+            
+            if (!task) return;
+
+            let contentHtml = '';
+            if (task.type === TaskTypes.DAILY) {
+                contentHtml = task.contents.map(c => `
+                    <div class="detail-item">
+                        <div class="detail-title">${c.contentName}</div>
+                        <div class="detail-desc">${c.contentDesc || '无描述'}</div>
+                        <div class="detail-meta">${c.type} · ${c.questionCount}道题</div>
+                    </div>
+                `).join('');
+            } else if (task.type === TaskTypes.WEEKLY) {
+                contentHtml = task.contents.map(c => `
+                    <div class="detail-item">
+                        <div class="detail-title">${c.contentName}</div>
+                        <div class="detail-desc">${c.descriptions.join('、') || '无描述'}</div>
+                        <div class="detail-meta">${c.type} · ${c.recordCount}次学习 · ${c.totalDuration}分钟</div>
+                    </div>
+                `).join('');
+            }
+
+            const overlay = document.createElement('div');
+            overlay.className = 'confirm-modal-overlay';
+            overlay.innerHTML = `
+                <div class="confirm-modal" style="max-width: 90%; max-height: 80%; overflow-y: auto;">
+                    <div class="confirm-title">${task.name}</div>
+                    <div class="confirm-message" style="text-align: left; max-height: 400px; overflow-y: auto;">
+                        <div style="margin-bottom: 15px;">
+                            <span class="task-type-badge">${Utils.formatTaskType(task.type)}</span>
+                            <span style="color: #666; margin-left: 10px;">${Utils.formatExpireTime(task.expireAt)}</span>
+                        </div>
+                        <div style="margin-bottom: 15px; padding: 10px; background: #f5f5f5; border-radius: 8px;">
+                            ${task.type === TaskTypes.DAILY 
+                                ? `📚 ${task.totalQuestions}道题 · 约${task.estimatedMinutes}分钟`
+                                : `📊 ${task.totalContents}个内容 · ${task.totalRecords}条记录`}
+                        </div>
+                        <div style="font-weight: 500; margin-bottom: 10px;">学习内容：</div>
+                        ${contentHtml}
+                    </div>
+                    <div class="confirm-buttons">
+                        <button class="btn confirm-btn-cancel" data-action="close">关闭</button>
+                    </div>
+                </div>
+            `;
+            
+            document.body.appendChild(overlay);
+            setTimeout(() => overlay.classList.add('show'), 10);
+            
+            overlay.querySelector('[data-action="close"]').onclick = () => {
+                overlay.classList.remove('show');
+                setTimeout(() => overlay.remove(), 300);
+            };
+            overlay.onclick = (e) => { if (e.target === overlay) {
+                overlay.classList.remove('show');
+                setTimeout(() => overlay.remove(), 300);
+            }};
+        }
+
+        /**
+         * 切换已过期区域显示
+         */
+        function toggleExpiredSection() {
+            const expiredList = document.getElementById('expired-list');
+            const toggle = document.getElementById('expired-toggle');
+            
+            if (expiredList.style.display === 'none') {
+                expiredList.style.display = 'block';
+                toggle.textContent = '▲';
+            } else {
+                expiredList.style.display = 'none';
+                toggle.textContent = '▼';
+            }
+        }
+
+        /**
+         * 全局任务操作函数（供外部调用）
+         */
+        async function toggleTask(taskId) {
+            const allTasks = await TaskSystem.getAllTasks();
+            const all = [...allTasks.daily, ...allTasks.weekly];
+            const task = all.find(t => t.id === taskId);
+            if (task) {
+                await handleTaskClick(taskId, task.type, task.status === 'completed' ? 'completed' : 'pending');
+            }
+        }
+
+        async function postponeTask(taskId) {
+            const allTasks = await TaskSystem.getAllTasks();
+            const all = [...allTasks.daily, ...allTasks.weekly];
+            const task = all.find(t => t.id === taskId);
+            if (task) {
+                await handlePostpone(taskId, task.type);
+            }
+        }
     </script>
+
+    <style>
+        .task-type-badge {
+            display: inline-block;
+            padding: 2px 8px;
+            font-size: 10px;
+            background: #e3f2fd;
+            color: #1976d2;
+            border-radius: 4px;
+            margin-left: 8px;
+            vertical-align: middle;
+        }
+        
+        .task-expire {
+            font-size: 12px;
+            margin-top: 4px;
+        }
+        
+        .task-expired {
+            opacity: 0.6;
+            background: #f5f5f5;
+        }
+        
+        .task-expired .task-checkbox.expired {
+            background: #9e9e9e;
+            border-color: #9e9e9e;
+        }
+        
+        .text-expired {
+            color: #999;
+        }
+        
+        .section-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 16px;
+            background: #fafafa;
+            border-radius: 8px;
+            margin-bottom: 12px;
+            cursor: pointer;
+        }
+        
+        .section-title {
+            font-weight: 500;
+            color: #666;
+        }
+        
+        .section-toggle {
+            color: #999;
+            font-size: 12px;
+        }
+        
+        .expired-section .card {
+            background: #fafafa;
+        }
+        
+        .detail-item {
+            padding: 12px;
+            background: #fff;
+            border-radius: 6px;
+            margin-bottom: 8px;
+            border: 1px solid #eee;
+        }
+        
+        .detail-title {
+            font-weight: 500;
+            margin-bottom: 4px;
+        }
+        
+        .detail-desc {
+            font-size: 13px;
+            color: #666;
+            margin-bottom: 4px;
+        }
+        
+        .detail-meta {
+            font-size: 12px;
+            color: #999;
+        }
+    </style>
 </body>
 </html>

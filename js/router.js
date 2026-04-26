@@ -127,7 +127,7 @@ const Router = {
                 </div>
                 <div class="header-right">
                     <div class="user-info">
-                        <div class="user-avatar">${Utils.getUserInitial(Storage.getCurrentUser().username)}</div>
+                        <div class="user-avatar">N</div>
                     </div>
                 </div>
             </header>
@@ -157,7 +157,8 @@ const Router = {
                     </svg>
                     <span>日历</span>
                 </a>
-                <a class="nav-item ${route === 'task' ? 'active' : ''}" href="#task">
+                <a class="nav-item ${route === 'task' ? 'active' : ''}" href="#task" style="position: relative;">
+                    ${this.getTaskBadgeHTML()}
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
                         <polyline points="22 4 12 14.01 9 11.01"></polyline>
@@ -196,7 +197,8 @@ const Router = {
                     </svg>
                     日历
                 </a>
-                <a class="nav-item ${route === 'task' ? 'active' : ''}" href="#task">
+                <a class="nav-item ${route === 'task' ? 'active' : ''}" href="#task" style="position: relative;">
+                    ${this.getTaskBadgeHTML()}
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
                         <polyline points="22 4 12 14.01 9 11.01"></polyline>
@@ -294,59 +296,6 @@ const Router = {
                     <div class="calendar-weekday">六</div>
                 </div>
                 <div class="calendar-days" id="calendar-days"></div>
-            </div>
-            
-            <!-- 功能入口 -->
-            <div class="card">
-                <div class="card-header">
-                    <div class="card-title">快捷入口</div>
-                </div>
-                <div class="quick-actions">
-                    <div class="quick-action" onclick="Router.go('record')">
-                        <div class="quick-action-icon">
-                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <line x1="12" y1="5" x2="12" y2="19"></line>
-                                <line x1="5" y1="12" x2="19" y2="12"></line>
-                            </svg>
-                        </div>
-                        <div class="quick-action-label">录入</div>
-                    </div>
-                    <div class="quick-action" onclick="Router.go('exam')">
-                        <div class="quick-action-icon" style="background: rgba(16,185,129,0.1);">
-                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#10B981" stroke-width="2">
-                                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-                                <polyline points="14 2 14 8 20 8"></polyline>
-                            </svg>
-                        </div>
-                        <div class="quick-action-label">答题</div>
-                    </div>
-                    <div class="quick-action" onclick="Router.go('task')">
-                        <div class="quick-action-icon" style="background: rgba(245,158,11,0.1);">
-                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#F59E0B" stroke-width="2">
-                                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
-                                <polyline points="22 4 12 14.01 9 11.01"></polyline>
-                            </svg>
-                        </div>
-                        <div class="quick-action-label">任务</div>
-                    </div>
-                    <div class="quick-action" onclick="Router.go('archive')">
-                        <div class="quick-action-icon" style="background: rgba(59,130,246,0.1);">
-                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#3B82F6" stroke-width="2">
-                                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
-                            </svg>
-                        </div>
-                        <div class="quick-action-label">档案</div>
-                    </div>
-                    <div class="quick-action" onclick="Router.go('knowledge')">
-                        <div class="quick-action-icon" style="background: rgba(236,72,153,0.1);">
-                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#EC4899" stroke-width="2">
-                                <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
-                                <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path>
-                            </svg>
-                        </div>
-                        <div class="quick-action-label">知识库</div>
-                    </div>
-                </div>
             </div>
         `;
     },
@@ -692,5 +641,34 @@ const Router = {
      */
     go(route) {
         window.location.hash = route;
+    },
+
+    /**
+     * 获取过去30天内未完成的任务数
+     */
+    getUncompletedTasksLast30Days() {
+        const tasks = Storage.getTasks();
+        const thirtyDaysAgo = new Date();
+        thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+        
+        return tasks.filter(task => {
+            // 未完成的任务（pending或postponed状态）
+            if (task.status === 'completed') return false;
+            
+            // 检查任务是否在30天内
+            const taskDate = new Date(task.due_date || task.created_at);
+            return taskDate >= thirtyDaysAgo;
+        }).length;
+    },
+
+    /**
+     * 获取任务Tab气泡HTML
+     */
+    getTaskBadgeHTML() {
+        const count = this.getUncompletedTasksLast30Days();
+        if (count > 0) {
+            return `<span class="nav-badge">${count > 99 ? '99+' : count}</span>`;
+        }
+        return '';
     }
 };

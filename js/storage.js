@@ -469,3 +469,413 @@ const Storage = {
         };
     }
 };
+// ============ 任务系统核心逻辑 ============
+
+/**
+ * 任务类型常量
+ */
+const TaskTypes = {
+    DAILY: 'daily',      // 天任务
+    WEEKLY: 'weekly'      // 周任务
+};
+
+/**
+ * 任务状态常量
+ */
+const TaskStatus = {
+    PENDING: 'pending',      // 待完成
+    COMPLETED: 'completed',  // 已完成
+    EXPIRED: 'expired'       // 已过期
+};
+
+/**
+ * 任务系统核心模块
+ */
+const TaskSystem = {
+    // 常量配置
+    QUESTIONS_PER_CONTENT: 5,  // 每个学习内容5道题
+    MAX_DAILY_MINUTES: 20,    // 天任务总时间≤20分钟
+    EXPIRED_THRESHOLD_DAYS: 30, // 超过30天移到已过期统计区
+
+    /**
+     * 获取任务存储路径
+     */
+    getTaskFilePath(type) {
+        return `tasks_${type}.json`;
+    },
+
+    // ============ 任务 CRUD 操作 ============
+
+    /**
+     * 获取所有任务（按类型分组）
+     */
+    async getAllTasks() {
+        const dailyTasks = await this.readFromFile(this.getTaskFilePath('daily')) || [];
+        const weeklyTasks = await this.readFromFile(this.getTaskFilePath('weekly')) || [];
+        return { daily: dailyTasks, weekly: weeklyTasks };
+    },
+
+    /**
+     * 从文件读取任务
+     */
+    async readFromFile(filePath) {
+        const data = await Storage.request(filePath);
+        return data || [];
+    },
+
+    /**
+     * 保存任务到文件
+     */
+    async saveToFile(filePath, tasks) {
+        return await Storage.request(filePath, {
+            method: 'PUT',
+            body: JSON.stringify(tasks)
+        });
+    },
+
+    /**
+     * 获取指定日期的天任务
+     */
+    async getDailyTask(date) {
+        const tasks = await this.readFromFile(this.getTaskFilePath('daily'));
+        return tasks.find(t => t.date === date) || null;
+    },
+
+    /**
+     * 获取指定周的任务
+     */
+    async getWeeklyTask(weekStartDate) {
+        const tasks = await this.readFromFile(this.getTaskFilePath('weekly'));
+        return tasks.find(t => t.weekStartDate === weekStartDate) || null;
+    },
+
+    /**
+     * 保存天任务
+     */
+    async saveDailyTask(task) {
+        const filePath = this.getTaskFilePath('daily');
+        let tasks = await this.readFromFile(filePath);
+        
+        // 检查是否已存在该日期任务
+        const existingIndex = tasks.findIndex(t => t.date === task.date);
+        if (existingIndex !== -1) {
+            tasks[existingIndex] = task;
+        } else {
+            tasks.push(task);
+        }
+        
+        return await this.saveToFile(filePath, tasks);
+    },
+
+    /**
+     * 保存周任务
+     */
+    async saveWeeklyTask(task) {
+        const filePath = this.getTaskFilePath('weekly');
+        let tasks = await this.readFromFile(filePath);
+        
+        const existingIndex = tasks.findIndex(t => t.weekStartDate === task.weekStartDate);
+        if (existingIndex !== -1) {
+            tasks[existingIndex] = task;
+        } else {
+            tasks.push(task);
+        }
+        
+        return await this.saveToFile(filePath, tasks);
+    },
+
+    /**
+     * 更新任务状态
+     */
+    async updateTaskStatus(taskType, taskId, status) {
+        const filePath = this.getTaskFilePath(taskType);
+        let tasks = await this.readFromFile(filePath);
+        
+        const taskIndex = tasks.findIndex(t => t.id === taskId);
+        if (taskIndex !== -1) {
+            tasks[taskIndex].status = status;
+            tasks[taskIndex].completedAt = status === TaskStatus.COMPLETED ? new Date().toISOString() : null;
+            await this.saveToFile(filePath, tasks);
+            return tasks[taskIndex];
+        }
+        return null;
+    },
+
+    /**
+     * 删除过期任务（超过30天）
+     */
+    async archiveExpiredTasks() {
+        const now = new Date();
+        const thresholdDate = new Date(now.getTime() - this.EXPIRED_THRESHOLD_DAYS * 24 * 60 * 60 * 1000);
+        
+        // 处理天任务
+        await this.archiveExpiredFromFile('daily', thresholdDate);
+        // 处理周任务
+        await this.archiveExpiredFromFile('weekly', thresholdDate);
+    },
+
+    /**
+     * 从指定文件归档过期任务
+     */
+    async archiveExpiredFromFile(taskType, thresholdDate) {
+        const filePath = this.getTaskFilePath(taskType);
+        const archiveFilePath = `archive_${filePath}`;
+        let tasks = await this.readFromFile(filePath);
+        
+        const expiredTasks = [];
+        const validTasks = [];
+        
+        for (const task of tasks) {
+            const expireDate = new Date(task.expireAt);
+            if (expireDate < thresholdDate) {
+                expiredTasks.push({...task, status: TaskStatus.EXPIRED});
+            } else {
+                validTasks.push(task);
+            }
+        }
+        
+        if (expiredTasks.length > 0) {
+            // 保存有效任务
+            await this.saveToFile(filePath, validTasks);
+            // 追加到归档
+            const archivedTasks = await this.readFromFile(archiveFilePath) || [];
+            await this.saveToFile(archiveFilePath, [...archivedTasks, ...expiredTasks]);
+        }
+    },
+
+    /**
+     * 获取已归档的过期任务
+     */
+    async getArchivedTasks() {
+        const dailyArchived = await this.readFromFile('archive_tasks_daily.json') || [];
+        const weeklyArchived = await this.readFromFile('archive_tasks_weekly.json') || [];
+        return { daily: dailyArchived, weekly: weeklyArchived };
+    },
+
+    // ============ 任务自动生成 ============
+
+    /**
+     * 触发任务生成（录入学习内容后调用）
+     */
+    async triggerTaskGeneration() {
+        const today = Utils.getToday();
+        const weekStart = Utils.getWeekStartDate();
+        
+        // 生成/更新今日天任务
+        await this.generateDailyTask(today);
+        
+        // 生成/更新本周周任务
+        await this.generateWeeklyTask(weekStart);
+    },
+
+    /**
+     * 生成天任务
+     * - 包含当天所有学习内容
+     * - 每个学习内容5道题
+     * - 总时间≤20分钟
+     */
+    async generateDailyTask(date) {
+        // 获取当天学习记录
+        const recordData = await Storage.getRecord(date);
+        const records = recordData.records || [];
+        
+        if (records.length === 0) {
+            return null;
+        }
+        
+        // 构建学习内容列表
+        const contents = records.map(record => ({
+            contentId: record.id,
+            contentName: record.content_name,
+            contentDesc: record.content_desc,
+            type: record.type,
+            questionCount: this.QUESTIONS_PER_CONTENT
+        }));
+        
+        // 计算总预估时间（每题约1分钟，每内容额外1分钟）
+        const totalMinutes = contents.length * (this.QUESTIONS_PER_CONTENT + 1);
+        
+        // 检查总时间是否超限
+        let adjustedContents = contents;
+        if (totalMinutes > this.MAX_DAILY_MINUTES) {
+            // 减少题目数量以满足时间限制
+            const maxQuestions = Math.floor(this.MAX_DAILY_MINUTES / contents.length) - 1;
+            adjustedContents = contents.map(c => ({
+                ...c,
+                questionCount: Math.min(c.questionCount, Math.max(3, maxQuestions))
+            }));
+        }
+        
+        // 计算过期时间（次日）
+        const expireDate = new Date(date);
+        expireDate.setDate(expireDate.getDate() + 1);
+        const expireAt = expireDate.toISOString();
+        
+        // 构建任务
+        const task = {
+            id: Utils.generateId('daily_'),
+            type: TaskTypes.DAILY,
+            date: date,
+            name: `${Utils.formatDateChinese(date)} 学习任务`,
+            contents: adjustedContents,
+            status: TaskStatus.PENDING,
+            totalQuestions: adjustedContents.reduce((sum, c) => sum + c.questionCount, 0),
+            estimatedMinutes: adjustedContents.reduce((sum, c) => sum + c.questionCount + 1, 0),
+            createdAt: new Date().toISOString(),
+            expireAt: expireAt
+        };
+        
+        await this.saveDailyTask(task);
+        return task;
+    },
+
+    /**
+     * 生成周任务
+     * - 本周学习汇总
+     * - 综合题目
+     */
+    async generateWeeklyTask(weekStartDate) {
+        // 获取本周所有学习记录
+        const weekRecords = await this.getWeekRecords(weekStartDate);
+        
+        if (weekRecords.length === 0) {
+            return null;
+        }
+        
+        // 按内容分组汇总
+        const contentSummary = {};
+        for (const record of weekRecords) {
+            const key = record.content_name;
+            if (!contentSummary[key]) {
+                contentSummary[key] = {
+                    contentName: record.content_name,
+                    type: record.type,
+                    recordCount: 0,
+                    totalDuration: 0,
+                    descriptions: []
+                };
+            }
+            contentSummary[key].recordCount++;
+            contentSummary[key].totalDuration += record.duration || 0;
+            if (record.content_desc && !contentSummary[key].descriptions.includes(record.content_desc)) {
+                contentSummary[key].descriptions.push(record.content_desc);
+            }
+        }
+        
+        // 计算过期时间（下周）
+        const expireDate = new Date(weekStartDate);
+        expireDate.setDate(expireDate.getDate() + 7);
+        const expireAt = expireDate.toISOString();
+        
+        // 构建周任务
+        const task = {
+            id: Utils.generateId('weekly_'),
+            type: TaskTypes.WEEKLY,
+            weekStartDate: weekStartDate,
+            weekEndDate: Utils.getWeekEndDate(weekStartDate),
+            name: `${Utils.formatDateChinese(weekStartDate)} 周学习总结`,
+            contents: Object.values(contentSummary),
+            status: TaskStatus.PENDING,
+            totalRecords: weekRecords.length,
+            totalContents: Object.keys(contentSummary).length,
+            totalMinutes: Object.values(contentSummary).reduce((sum, c) => sum + c.totalDuration, 0),
+            createdAt: new Date().toISOString(),
+            expireAt: expireAt
+        };
+        
+        await this.saveWeeklyTask(task);
+        return task;
+    },
+
+    /**
+     * 获取指定周的所有学习记录
+     */
+    async getWeekRecords(weekStartDate) {
+        const records = [];
+        const start = new Date(weekStartDate);
+        
+        for (let i = 0; i < 7; i++) {
+            const date = new Date(start);
+            date.setDate(date.getDate() + i);
+            const dateStr = Utils.formatDate(date, 'YYYY-MM-DD');
+            const recordData = await Storage.getRecord(dateStr);
+            if (recordData.records && recordData.records.length > 0) {
+                records.push(...recordData.records);
+            }
+        }
+        
+        return records;
+    },
+
+    /**
+     * 获取今日所有待完成任务
+     */
+    async getPendingTasks() {
+        const today = Utils.getToday();
+        const weekStart = Utils.getWeekStartDate();
+        
+        const dailyTask = await this.getDailyTask(today);
+        const weeklyTask = await this.getWeeklyTask(weekStart);
+        
+        const pending = [];
+        
+        if (dailyTask && dailyTask.status === TaskStatus.PENDING) {
+            pending.push(dailyTask);
+        }
+        
+        if (weeklyTask && weeklyTask.status === TaskStatus.PENDING) {
+            pending.push(weeklyTask);
+        }
+        
+        return pending;
+    },
+
+    /**
+     * 获取已过期但未归档的任务
+     */
+    async getExpiredTasks() {
+        const now = new Date();
+        const allTasks = await this.getAllTasks();
+        
+        const expired = [];
+        
+        for (const task of [...allTasks.daily, ...allTasks.weekly]) {
+            if (task.status !== TaskStatus.COMPLETED) {
+                const expireDate = new Date(task.expireAt);
+                if (expireDate < now) {
+                    task.status = TaskStatus.EXPIRED;
+                    expired.push(task);
+                }
+            }
+        }
+        
+        return expired;
+    },
+
+    /**
+     * 完成任务（做题）
+     */
+    async completeTask(taskType, taskId) {
+        return await this.updateTaskStatus(taskType, taskId, TaskStatus.COMPLETED);
+    },
+
+    /**
+     * 延期任务
+     */
+    async postponeTask(taskType, taskId, days = 1) {
+        const filePath = this.getTaskFilePath(taskType);
+        let tasks = await this.readFromFile(filePath);
+        
+        const taskIndex = tasks.findIndex(t => t.id === taskId);
+        if (taskIndex !== -1) {
+            const task = tasks[taskIndex];
+            const newExpireDate = new Date(task.expireAt);
+            newExpireDate.setDate(newExpireDate.getDate() + days);
+            task.expireAt = newExpireDate.toISOString();
+            task.status = TaskStatus.PENDING;
+            await this.saveToFile(filePath, tasks);
+            return task;
+        }
+        return null;
+    }
+};

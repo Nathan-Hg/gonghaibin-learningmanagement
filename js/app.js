@@ -129,7 +129,18 @@ const App = {
             records = {};
         }
         
-        return records;
+        // 转换为每天的学习类型数量（去重）
+        const typeCountMap = {};
+        for (const dateStr in records) {
+            const dayRecords = records[dateStr] || [];
+            if (dayRecords.length > 0) {
+                // 获取当天不同学习类型的数量
+                const types = new Set(dayRecords.map(r => r.type));
+                typeCountMap[dateStr] = types.size;
+            }
+        }
+        
+        return typeCountMap;
     },
     
     /**
@@ -784,14 +795,242 @@ const App = {
      * 提交考核
      */
     async submitExam() {
-        const confirmed = await Utils.showConfirm('提交考核', '确认提交考核？提交后将无法修改。');
-        if (confirmed) {
-            Utils.showToast('考核已提交，正在评分...', 'success');
-            setTimeout(() => {
-                Utils.showToast('考核完成！平均得分8.5星', 'success');
-                Router.go('home');
-            }, 2000);
+        // 检查是否有答案
+        const answers = this.examAnswers;
+        const answerCount = Object.keys(answers).length;
+        
+        if (answerCount === 0) {
+            Utils.showToast('请至少回答一道题', 'error');
+            return;
         }
+        
+        const confirmed = await Utils.showConfirm('提交考核', `已回答${answerCount}道题，确认提交？`);
+        if (!confirmed) return;
+        
+        Utils.showToast('正在AI评分中，请稍候...', 'default');
+        
+        try {
+            // 调用AI评分
+            const results = await this.aiGradeAnswers(answers);
+            
+            // 显示评分结果页
+            this.showExamResults(results);
+            
+        } catch (error) {
+            console.error('AI评分失败:', error);
+            Utils.showToast('评分失败：' + error.message, 'error');
+        }
+    },
+    
+    /**
+     * AI评分 - 调用DeepSeek
+     */
+    async aiGradeAnswers(answers) {
+        const DEEPSEEK_API_KEY = localStorage.getItem('deepseek_api_key') || 'sk-dda01297df2c4048b80578fe86e7946b';
+        const results = [];
+        
+        // 获取题目信息
+        const exam = Storage.generateMockExam();
+        const questions = exam.questions;
+        
+        for (const q of questions) {
+            const answer = answers[q.id];
+            if (!answer || !answer.text) {
+                results.push({
+                    questionId: q.id,
+                    question: q.question,
+                    type: q.type,
+                    answer: '未作答',
+                    scores: { accuracy: 0, clarity: 0, mastery: 0, total: 0 },
+                    comment: '未作答'
+                });
+                continue;
+            }
+            
+            // 调用DeepSeek API评分
+            try {
+                const prompt = `你是一位专业的学习评测老师。请对学生的回答进行评分。
+
+题目：${q.question}
+题目类型：${q.type === '记忆' ? '记忆题（考察对知识点的记忆）' : '理解题（考察对知识的理解和应用）'}
+
+学生回答：${answer.text}
+
+请从以下三个维度评分（每项1-10分）：
+1. 内容准确性：答案是否准确、完整
+2. 表达清晰度：表达是否清晰、有条理
+3. 知识掌握度：对相关知识的理解程度
+
+请用JSON格式返回评分结果，格式如下：
+{
+  "accuracy": 数字,
+  "clarity": 数字,
+  "mastery": 数字,
+  "comment": "详细评价（至少50字，指出优点和改进建议）"
+}
+
+只返回JSON，不要其他内容。`;
+
+                const response = await fetch('https://api.deepseek.com/chat/completions', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${DEEPSEEK_API_KEY}`
+                    },
+                    body: JSON.stringify({
+                        model: 'deepseek-chat',
+                        messages: [
+                            { role: 'system', content: '你是一位专业的学习评测老师，擅长对学生的回答进行客观、详细的评分和点评。' },
+                            { role: 'user', content: prompt }
+                        ],
+                        temperature: 0.7,
+                        max_tokens: 500
+                    })
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`API调用失败: ${response.status}`);
+                }
+                
+                const data = await response.json();
+                const content = data.choices[0].message.content;
+                
+                // 解析JSON
+                let gradeResult;
+                try {
+                    // 尝试提取JSON
+                    const jsonMatch = content.match(/\{[\s\S]*\}/);
+                    if (jsonMatch) {
+                        gradeResult = JSON.parse(jsonMatch[0]);
+                    } else {
+                        throw new Error('无法解析评分结果');
+                    }
+                } catch (e) {
+                    // 解析失败，使用默认值
+                    gradeResult = {
+                        accuracy: 5,
+                        clarity: 5,
+                        mastery: 5,
+                        comment: content
+                    };
+                }
+                
+                results.push({
+                    questionId: q.id,
+                    question: q.question,
+                    type: q.type,
+                    answer: answer.text,
+                    scores: {
+                        accuracy: gradeResult.accuracy || 5,
+                        clarity: gradeResult.clarity || 5,
+                        mastery: gradeResult.mastery || 5,
+                        total: Math.round(((gradeResult.accuracy || 5) + (gradeResult.clarity || 5) + (gradeResult.mastery || 5)) / 3 * 10) / 10
+                    },
+                    comment: gradeResult.comment || '暂无评价'
+                });
+                
+            } catch (error) {
+                console.error('评分出错:', error);
+                results.push({
+                    questionId: q.id,
+                    question: q.question,
+                    type: q.type,
+                    answer: answer.text,
+                    scores: { accuracy: 5, clarity: 5, mastery: 5, total: 5 },
+                    comment: '评分服务暂时不可用'
+                });
+            }
+        }
+        
+        return results;
+    },
+    
+    /**
+     * 显示评分结果页
+     */
+    showExamResults(results) {
+        // 计算总分
+        const totalScore = results.reduce((sum, r) => sum + r.scores.total, 0);
+        const avgScore = (totalScore / results.length).toFixed(1);
+        
+        // 计算各维度平均分
+        const avgAccuracy = (results.reduce((sum, r) => sum + r.scores.accuracy, 0) / results.length).toFixed(1);
+        const avgClarity = (results.reduce((sum, r) => sum + r.scores.clarity, 0) / results.length).toFixed(1);
+        const avgMastery = (results.reduce((sum, r) => sum + r.scores.mastery, 0) / results.length).toFixed(1);
+        
+        const container = document.getElementById('exam-content');
+        if (!container) return;
+        
+        container.innerHTML = `
+            <div class="card mb-4" style="background: linear-gradient(135deg, #7C3AED, #A78BFA); color: white;">
+                <div style="text-align: center; padding: 20px;">
+                    <div style="font-size: 48px; font-weight: bold;">${avgScore}</div>
+                    <div style="font-size: 14px; opacity: 0.9;">综合评分（满分10分）</div>
+                </div>
+                <div style="display: flex; justify-content: space-around; padding: 16px 0; border-top: 1px solid rgba(255,255,255,0.2);">
+                    <div style="text-align: center;">
+                        <div style="font-size: 20px; font-weight: bold;">${avgAccuracy}</div>
+                        <div style="font-size: 12px; opacity: 0.8;">准确性</div>
+                    </div>
+                    <div style="text-align: center;">
+                        <div style="font-size: 20px; font-weight: bold;">${avgClarity}</div>
+                        <div style="font-size: 12px; opacity: 0.8;">清晰度</div>
+                    </div>
+                    <div style="text-align: center;">
+                        <div style="font-size: 20px; font-weight: bold;">${avgMastery}</div>
+                        <div style="font-size: 12px; opacity: 0.8;">掌握度</div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="page-header" style="margin-bottom: 16px;">
+                <div class="page-title">AI评价详情</div>
+            </div>
+            
+            ${results.map((r, index) => `
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <span class="question-type ${r.type === '记忆' ? 'memory' : 'understanding'}">
+                            ${r.type === '记忆' ? '💭 记忆题' : '💡 理解题'}
+                        </span>
+                        <span style="font-weight: bold; color: #7C3AED;">${r.scores.total}分</span>
+                    </div>
+                    <div style="padding: 16px;">
+                        <div style="font-weight: 500; margin-bottom: 12px;">${index + 1}. ${r.question}</div>
+                        
+                        <div style="background: var(--bg-secondary); padding: 12px; border-radius: 8px; margin-bottom: 12px;">
+                            <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 4px;">你的回答：</div>
+                            <div style="font-size: 14px;">${r.answer}</div>
+                        </div>
+                        
+                        <div style="display: flex; gap: 16px; margin-bottom: 12px; font-size: 13px;">
+                            <span>准确性: ${r.scores.accuracy}/10</span>
+                            <span>清晰度: ${r.scores.clarity}/10</span>
+                            <span>掌握度: ${r.scores.mastery}/10</span>
+                        </div>
+                        
+                        <div style="background: linear-gradient(135deg, #F3E8FF, #E9D5FF); padding: 12px; border-radius: 8px;">
+                            <div style="font-size: 12px; color: #7C3AED; margin-bottom: 4px;">💡 AI点评：</div>
+                            <div style="font-size: 14px; color: #1E293B; line-height: 1.6;">${r.comment}</div>
+                        </div>
+                    </div>
+                </div>
+            `).join('')}
+            
+            <button class="btn btn-primary btn-lg" style="width: 100%;" onclick="Router.go('home')">
+                返回首页
+            </button>
+        `;
+        
+        // 保存评分结果
+        Storage.saveExamResult({
+            date: new Date().toISOString().split('T')[0],
+            results: results,
+            avgScore: parseFloat(avgScore),
+            timestamp: Date.now()
+        });
+        
+        Utils.showToast('✅ AI评分完成！', 'success');
     },
     
     // ============ 学习档案相关 ============
